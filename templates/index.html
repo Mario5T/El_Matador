@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="AI-powered news article credibility classifier using supervised machine learning. Analyze articles for misinformation risk." />
+    <title>VerifyAI — News Credibility Classifier</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+    <!-- Ambient background orbs -->
+    <div class="bg-orb bg-orb-1"></div>
+    <div class="bg-orb bg-orb-2"></div>
+    <div class="bg-orb bg-orb-3"></div>
+
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="logo">
+                <div class="logo-icon">
+                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                    </svg>
+                </div>
+                <h1>Verify<span class="accent">AI</span></h1>
+            </div>
+            <p class="tagline">Supervised ML-powered news credibility analysis</p>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-grid">
+            <!-- Input Panel -->
+            <section class="card input-card" id="input-card">
+                <div class="card-header">
+                    <div class="card-icon">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                            <polyline points="14 2 14 8 20 8"/>
+                            <line x1="16" y1="13" x2="8" y2="13"/>
+                            <line x1="16" y1="17" x2="8" y2="17"/>
+                            <polyline points="10 9 9 9 8 9"/>
+                        </svg>
+                    </div>
+                    <h2>Article Input</h2>
+                </div>
+
+                <div class="input-group">
+                    <label for="article-title">Title <span class="optional">(optional)</span></label>
+                    <input type="text" id="article-title" placeholder="Enter the article headline…" autocomplete="off" />
+                </div>
+
+                <div class="input-group">
+                    <label for="article-text">Article Text</label>
+                    <textarea id="article-text" rows="12" placeholder="Paste the full article text here for analysis…"></textarea>
+                </div>
+
+                <div class="input-actions">
+                    <button class="btn btn-primary" id="analyze-btn" onclick="analyzeArticle()">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="11" cy="11" r="8"/>
+                            <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                        </svg>
+                        <span>Analyze Credibility</span>
+                    </button>
+                    <button class="btn btn-ghost" onclick="clearForm()">Clear</button>
+                </div>
+
+                <div class="char-count">
+                    <span id="char-counter">0</span> characters
+                </div>
+            </section>
+
+            <!-- Results Panel -->
+            <section class="card result-card" id="result-card">
+                <!-- Empty state -->
+                <div class="empty-state" id="empty-state">
+                    <div class="empty-icon">
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                        </svg>
+                    </div>
+                    <h3>Ready to Analyze</h3>
+                    <p>Paste an article on the left and click <strong>Analyze Credibility</strong> to get started.</p>
+                </div>
+
+                <!-- Loading state -->
+                <div class="loading-state hidden" id="loading-state">
+                    <div class="spinner"></div>
+                    <p>Analyzing article credibility…</p>
+                </div>
+
+                <!-- Results Content -->
+                <div class="results-content hidden" id="results-content">
+                    <div class="card-header">
+                        <div class="card-icon">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                                <polyline points="22 4 12 14.01 9 11.01"/>
+                            </svg>
+                        </div>
+                        <h2>Analysis Result</h2>
+                    </div>
+
+                    <!-- Verdict Badge -->
+                    <div class="verdict-container">
+                        <div class="verdict-badge" id="verdict-badge">
+                            <span class="verdict-icon" id="verdict-icon"></span>
+                            <span class="verdict-label" id="verdict-label"></span>
+                        </div>
+                    </div>
+
+                    <!-- Confidence Meter -->
+                    <div class="confidence-section">
+                        <div class="confidence-header">
+                            <span>Confidence Score</span>
+                            <span class="confidence-value" id="confidence-value">—</span>
+                        </div>
+                        <div class="confidence-bar-track">
+                            <div class="confidence-bar-fill" id="confidence-bar"></div>
+                        </div>
+                    </div>
+
+                    <!-- Details -->
+                    <div class="result-details">
+                        <div class="detail-row">
+                            <span class="detail-label">Classification</span>
+                            <span class="detail-value" id="detail-class">—</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Label</span>
+                            <span class="detail-value" id="detail-label">—</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Model Confidence</span>
+                            <span class="detail-value" id="detail-confidence">—</span>
+                        </div>
+                    </div>
+
+                    <!-- Disclaimer -->
+                    <div class="disclaimer" id="disclaimer-box">
+                        <div class="disclaimer-icon">⚠️</div>
+                        <p id="disclaimer-text"></p>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p>VerifyAI — Probabilistic credibility classification powered by supervised machine learning.</p>
+            <p class="footer-sub">Trained on the WELFake dataset (~362K articles). Does not perform real-time fact verification.</p>
+        </footer>
+    </div>
+
+    <script src="/static/script.js"></script>
+</body>
+</html>
