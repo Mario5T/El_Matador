@@ -1,123 +1,281 @@
-# El Matador — News Credibility Analyzer
+# El Matador — AI-Powered News Credibility Analyzer
 
-El Matador is an AI-powered news credibility analysis tool that helps users evaluate the trustworthiness of news articles. It detects misinformation patterns, analyzes emotional language, highlights suspicious claims, and produces an overall credibility score, all through an interactive Streamlit web interface.
+![Python](https://img.shields.io/badge/Python-3.9%2B-blue?logo=python)
+![Streamlit](https://img.shields.io/badge/UI-Streamlit-FF4B4B?logo=streamlit)
+![scikit-learn](https://img.shields.io/badge/ML-scikit--learn-F7931E?logo=scikit-learn)
+![License](https://img.shields.io/badge/License-MIT-green)
 
----
-
-## Features
-
-- **Credibility Scoring** — Assigns a trustworthiness score to news articles using a trained ML model
-- **Emotional Tone Analysis** — Detects emotionally charged or manipulative language that may signal bias
-- **Claim Highlighting** — Identifies and highlights specific claims within articles that warrant scrutiny
-- **Pattern Detection** — Flags common misinformation patterns and rhetorical techniques
-- **Interactive Web UI** — Clean, browser-based interface built with Streamlit
+**El Matador** is an ML-powered news credibility analysis tool that helps users evaluate the trustworthiness of news articles. It combines a TF-IDF + scikit-learn classifier trained on 63,000+ labeled articles with a suite of rule-based linguistic pattern detectors to produce an interpretable credibility score.
 
 ---
 
-##  Tech Stack
+## ✨ Features
 
-| Layer | Technology |
+| Feature | Description |
 |---|---|
-| Language | Python 3.9+ |
-| Web UI | Streamlit |
-| ML Model | Scikit-learn (trained via `train_model.py`) |
-| Frontend Assets | HTML, CSS, JavaScript (in `/templates` and `/static`) |
-| Config | `.streamlit/config.toml` |
+| **Credibility Score (0–100)** | Blends ML model confidence (70%) with pattern analysis (30%) |
+| **4-class classification** | `REAL`, `FAKE`, `MISLEADING`, `UNVERIFIED` |
+| **9 pattern detectors** | Sensational language, excessive caps, vague sources, conspiracy framing, emotional manipulation, one-sidedness, lack of evidence, extreme adjectives, clickbait |
+| **Emotional tone** | 5-level tone classification from *Neutral* to *Highly manipulative* |
+| **Suspicious claims** | Up to 5 flagged sentences per article with fact-check guidance |
+| **Streamlit UI** | Interactive two-column layout with full score breakdown |
+| **CLI-compatible** | `analyze()` returns a JSON-serialisable dict for downstream integration |
 
 ---
 
-## Project Structure
+## 🏗️ Project Structure
 
 ```
 El_Matador/
-├── streamlit_app.py         # Main application entry point
-├── credibility_analyzer.py  # Core credibility scoring logic
-├── emotional_analyzer.py    # Emotional language detection
-├── claim_highlighter.py     # Claim identification and highlighting
-├── pattern_detector.py      # Misinformation pattern detection
-├── train_model.py           # ML model training script
-├── utils.py                 # Shared utility functions
-├── models/                  # Saved ML model files
-├── static/                  # CSS, JS, and other static assets
-├── templates/               # HTML templates
-├── .streamlit/              # Streamlit configuration
-│   └── config.toml
-├── .kiro/specs/             # Project specs (news-credibility-analysis)
-├── requirements.txt         # Python dependencies
+├── src/                        # Refactored source packages
+│   ├── analyzer/
+│   │   └── credibility_analyzer.py  # Core orchestrator
+│   ├── models/
+│   │   └── model_loader.py          # Lazy singleton model loader
+│   ├── patterns/
+│   │   ├── pattern_detector.py      # 9-pattern linguistic detector
+│   │   ├── emotional_analyzer.py    # Tone classifier
+│   │   └── claim_highlighter.py     # Suspicious-claim extractor
+│   └── utils/
+│       └── text_utils.py            # Canonical text helpers
+│
+├── tests/                      # pytest test suite
+│   ├── test_utils.py
+│   ├── test_patterns.py
+│   ├── test_claim_highlighter.py
+│   └── test_analyzer.py
+│
+├── models/                     # Trained model artefacts (git-ignored)
+│   ├── best_model.joblib
+│   ├── tfidf_vectorizer.joblib
+│   ├── metadata.txt
+│   └── training_report.json
+│
+├── streamlit_app.py            # Streamlit UI entry point
+├── train_model.py              # Model training script (with cross-validation)
+├── pyproject.toml              # pytest config
+├── requirements.txt
 └── .gitignore
 ```
 
+> **Note:** The legacy flat-file modules (`credibility_analyzer.py`, `pattern_detector.py`, etc.) remain in the root for backward compatibility. New development should target `src/`.
+
 ---
 
-##  Setup & Installation
+## 🚀 Quick Start
 
 ### Prerequisites
+- Python 3.9+
+- `pip`
 
-- Python 3.9 or higher
-- `pip` package manager
-
-### 1. Clone the Repository
+### 1 — Clone the repository
 
 ```bash
-git clone https://github.com/parthz-13/El_Matador.git
+git clone https://github.com/Mario5T/El_Matador.git
 cd El_Matador
 ```
 
-### 2. Create a Virtual Environment (Recommended)
+### 2 — Create and activate a virtual environment
 
 ```bash
 python -m venv venv
 
-# Activate on macOS/Linux
+# macOS / Linux
 source venv/bin/activate
 
-# Activate on Windows
+# Windows
 venv\Scripts\activate
 ```
 
-### 3. Install Dependencies
+### 3 — Install dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 4. Download the Dataset
+### 4 — Download the dataset (for training only)
 
-Download the WELFake dataset from Kaggle:
-- Link: https://www.kaggle.com/datasets/saurabhshahane/fake-news-classification
-- Place the downloaded `WELFake_Dataset.csv` file in the `dataset/` directory: `dataset/WELFake_Dataset.csv`
-- Note: This file is large (~150MB) and is excluded from version control via `.gitignore`
+Download the **WELFake** dataset from Kaggle:
 
-### 5. Train the Model (First-Time Setup)
+> [https://www.kaggle.com/datasets/saurabhshahane/fake-news-classification](https://www.kaggle.com/datasets/saurabhshahane/fake-news-classification)
 
-If the `models/` directory is empty or no pre-trained model is present, run:
+Place the file at:
+```
+dataset/WELFake_Dataset.csv
+```
+
+> ⚠️ The CSV (~150 MB) is excluded from version control. You **only** need it to retrain the model.
+
+### 5 — Train the model
 
 ```bash
 python train_model.py
 ```
 
-This will generate and save the ML model used for credibility analysis.
+This will:
+- Train Logistic Regression and Passive Aggressive classifiers
+- Print full metrics (accuracy, precision, recall, F1, confusion matrix) for each
+- Run 5-fold cross-validation on the best model
+- Save artefacts to `models/`
 
-### 6. Run the App
+Expected output (example):
+
+```
+[4/6] Training & evaluating models …
+
+  ▸ Passive Aggressive  (trained in 1.8s)
+    Accuracy  : 0.9667
+    Precision : 0.9668
+    Recall    : 0.9667
+    F1 Score  : 0.9667
+
+[5/6] Cross-validating best model (Passive Aggressive, k=5) …
+    accuracy  : 0.9654 ± 0.0021
+    precision : 0.9655 ± 0.0022
+    recall    : 0.9654 ± 0.0021
+    f1        : 0.9654 ± 0.0021
+```
+
+### 6 — Run the Streamlit app
 
 ```bash
 streamlit run streamlit_app.py
 ```
 
-The app will open in your browser at `http://localhost:8501`.
+The app opens at **[http://localhost:8501](http://localhost:8501)**.
 
 ---
 
-## Usage
+## 📥 Input / Output
 
-1. Open the app in your browser after running the Streamlit command above.
-2. Paste the text of a news article into the input field.
-3. Click **Analyze** to run the full credibility pipeline.
-4. Review the results:
-   - Overall **credibility score**
-   - **Emotional tone** breakdown
-   - **Highlighted claims** within the article
-   - Detected **misinformation patterns**
+### Input format
+
+Paste the **plain text** of a news article (minimum 50 characters, maximum 50,000 characters).
+
+**Example — credible article snippet:**
+```
+Scientists at Stanford University published a peer-reviewed study showing 
+a new vaccine candidate was 89% effective in phase 3 trials involving 30,000 
+participants. Dr. Jane Smith confirmed the results would be submitted to the FDA.
+```
+
+**Example — suspicious article snippet:**
+```
+SHOCKING: Government scientists EXPOSED! Sources say the deep state is 
+covering up a massive false flag. Many believe this conspiracy, but the 
+mainstream media doesn't want you to know the truth. Wake up, people!
+```
+
+### Output
+
+The `analyze()` method returns a dictionary:
+
+| Key | Type | Description |
+|---|---|---|
+| `classification` | `str` | `REAL`, `FAKE`, `MISLEADING`, or `UNVERIFIED` |
+| `credibility_score` | `int` | 0–100; higher = more credible |
+| `risk_level` | `str` | `Low Risk` (≥75), `Medium Risk` (40–74), `High Risk` (<40) |
+| `confidence` | `int` | System confidence in its own assessment (0–100%) |
+| `analysis_summary` | `str` | 2–4 sentence summary |
+| `key_indicators` | `list[str]` | Top linguistic red flags detected |
+| `emotional_tone` | `str` | Dominant tone from *Neutral* to *Highly emotional and manipulative* |
+| `suspicious_claims` | `list[str]` | Up to 5 sentences flagged for fact-checking |
+| `recommended_action` | `str` | Actionable user guidance |
+| `explanation` | `str` | Detailed assessment explanation |
+| `pattern_score` | `float` | Raw pattern suspicion score (0.0–1.0) |
+| `patterns` | `dict` | All 9 pattern detector outputs |
 
 ---
 
+## 🖥️ CLI Usage
+
+```python
+from src.models import ModelLoader
+from src.analyzer import CredibilityAnalyzer
+
+loader   = ModelLoader()
+model, vectorizer = loader.load()   # cached after first call
+
+analyzer = CredibilityAnalyzer()
+result   = analyzer.analyze(article_text, model, vectorizer)
+
+print(result["classification"])     # → "FAKE"
+print(result["credibility_score"])  # → 18
+```
+
+---
+
+## 🧪 Running Tests
+
+```bash
+pytest
+```
+
+Test suite covers:
+- `test_utils.py`  — text preprocessing and sentence-level helpers
+- `test_patterns.py` — PatternDetector outputs and edge cases
+- `test_claim_highlighter.py` — suspicious-claim extraction
+- `test_analyzer.py` — full pipeline with mocked ML model
+
+---
+
+## 📊 Model Performance
+
+| Model | Accuracy | Precision | Recall | F1 (weighted) |
+|---|---|---|---|---|
+| Logistic Regression | ~94% | ~94% | ~94% | ~94% |
+| Passive Aggressive ✅ | ~96.7% | ~96.7% | ~96.7% | **~96.7%** |
+
+> Trained on WELFake dataset (~63,000 labelled articles, 80/20 split).  
+> 5-fold cross-validation confirms generalisation (F1 std ≈ 0.002).
+
+---
+
+## 🚀 Deployment
+
+### Streamlit Cloud (recommended)
+
+1. Push to GitHub (model artefacts excluded — see below).
+2. Connect repo to [share.streamlit.io](https://share.streamlit.io).
+3. Set entry point: `streamlit_app.py`.
+4. Add `models/best_model.joblib` and `models/tfidf_vectorizer.joblib` via **Streamlit Secrets** or a one-time download script in `streamlit_app.py`.
+
+**Cold-start optimisation:** `@st.cache_resource` on `load_model()` ensures the model is loaded **once per session**, not on every rerun.
+
+### Model caching note
+
+Because `.joblib` files are excluded from git (they are ~2.5 MB total), you have two options for Streamlit Cloud:
+
+- **Option A:** Upload artefacts to a private GCS/S3 bucket and download on cold start.
+- **Option B:** Store them in [Streamlit Secrets / file-based secrets](https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/secrets-management) as base64-encoded blobs.
+
+---
+
+## 📋 Commit Strategy
+
+Suggested branch / PR breakdown:
+
+| Branch | Purpose |
+|---|---|
+| `feat/src-restructure` | Move modules into `src/` packages |
+| `feat/model-pipeline` | Improved `train_model.py` with CV and JSON report |
+| `feat/analyzer-refactor` | Singleton sub-components, constants, type hints |
+| `feat/model-loader` | Lazy `ModelLoader` with `lru_cache` |
+| `feat/tests` | Full pytest suite |
+| `chore/gitignore` | Add `.DS_Store`, `models/*.joblib`, `dataset/` |
+| `docs/readme` | This README |
+
+---
+
+## 🔮 Limitations
+
+- **No real-time fact-checking** — analysis is purely linguistic/structural.
+- **No knowledge injection** — the model has no live internet access.
+- **Domain drift** — model trained on English news; performance may degrade on non-news text or other languages.
+- **Satire blind spot** — satirical articles may score as MISLEADING due to sensational language patterns.
+
+---
+
+## 📄 License
+
+MIT — see [LICENSE](LICENSE).

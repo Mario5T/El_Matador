@@ -1,1393 +1,907 @@
 """
-VerifyAI: ML-Based News Credibility Analysis
-Streamlit Web Application
-
-This application provides an interpretable, research-grade interface for
-ML-based news credibility analysis using the CredibilityAnalyzer system.
-
-ACCESSIBILITY FEATURES (Requirements 16.1-16.5):
-- Semantic HTML: Uses st.header, st.subheader, st.text_area for proper structure
-- Text alternatives: All color-coded information includes text labels (e.g., "Low Risk", "High Risk")
-- Color contrast: WCAG AA compliant colors with sufficient contrast ratios
-- Descriptive labels: All input elements have clear, descriptive labels
-- Keyboard navigation: Standard Streamlit controls support keyboard navigation
+El Matador — News Credibility Analyzer
+ML-Based Credibility Analysis · Streamlit UI
 """
 
+import os
 import streamlit as st
 import joblib
-import os
-from typing import Tuple, Dict, List, Optional
+from typing import Tuple, Dict, List, Any
 from credibility_analyzer import CredibilityAnalyzer
 
+# ── page config (must be first Streamlit call) ─────────────────────────────
+st.set_page_config(
+    page_title="El Matador — News Credibility Analyzer",
+    page_icon="🎯",
+    layout="wide",
+    initial_sidebar_state="collapsed",
+)
 
-# ============================================================================
-# UI Configuration Constants
-# ============================================================================
+# ══════════════════════════════════════════════════════════════════════════════
+#  DESIGN SYSTEM
+#  Brand colors: Red (#e63946) · Yellow (#fbbf24) · Blue (#3b82f6)
+# ══════════════════════════════════════════════════════════════════════════════
+def inject_css():
+    st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
 
-class UIConfig:
-    """Configuration constants for the UI."""
-    
-    # Layout
-    LAYOUT_MODE = "wide"
-    COLUMN_RATIO = [1, 1.3]
-    
-    # Input validation
-    MIN_TEXT_LENGTH = 50
-    MAX_TEXT_LENGTH = 50000
-    
-    # Text area
-    TEXT_AREA_HEIGHT = 300
-    
-    # Color scheme - WCAG AA compliant colors for accessibility
-    COLOR_REAL = "#28a745"      # Green - sufficient contrast on white background
-    COLOR_FAKE = "#dc3545"      # Red - sufficient contrast on white background
-    COLOR_MISLEADING = "#d63384"  # Darker pink/magenta - improved contrast (was #fd7e14)
-    COLOR_UNVERIFIED = "#6c757d" # Gray - sufficient contrast on white background
-    
-    # Risk level colors - WCAG AA compliant
-    COLOR_LOW_RISK = "#28a745"   # Green - sufficient contrast on white background
-    COLOR_MEDIUM_RISK = "#ffc107" # Yellow - used with dark text for contrast
-    COLOR_HIGH_RISK = "#dc3545"  # Red - sufficient contrast on white background
-    
-    # Model information
-    MODEL_TYPE = "TF-IDF + Logistic Regression"
-    DATASET_SIZE = "362,000+ labeled articles"
-    
-    # Performance metrics (from training)
-    ACCURACY = 0.95
-    PRECISION = 0.94
-    RECALL = 0.96
-    F1_SCORE = 0.95
+:root {
+  /* Surfaces */
+  --surface:         #10131a;
+  --surface-lowest:  #0b0e15;
+  --surface-low:     #191b23;
+  --surface-ctr:     #1e2029;
+  --surface-high:    #272a31;
+  --surface-highest: #32353c;
 
+  /* Brand: Red → Yellow → Blue */
+  --red:       #e63946;
+  --red-dark:  #b71c2c;
+  --red-glow:  rgba(230,57,70,.22);
+  --yellow:    #fbbf24;
+  --yellow-dk: #d97706;
+  --yel-glow:  rgba(251,191,36,.18);
+  --blue:      #3b82f6;
+  --blue-lt:   #93c5fd;
+  --blue-glow: rgba(59,130,246,.20);
 
-# ============================================================================
-# Model Loading and Caching Layer
-# ============================================================================
-
-@st.cache_resource
-def load_analyzer() -> CredibilityAnalyzer:
-    """
-    Load and cache the CredibilityAnalyzer instance.
-    
-    This function uses Streamlit's cache_resource decorator to ensure the
-    analyzer is loaded only once per session, improving performance across
-    page reruns.
-    
-    Returns:
-        CredibilityAnalyzer: Cached analyzer instance
-        
-    Raises:
-        FileNotFoundError: If required backend files are missing
-        Exception: If analyzer initialization fails
-    """
-    try:
-        analyzer = CredibilityAnalyzer()
-        return analyzer
-    except FileNotFoundError as e:
-        st.error(f"**Model Loading Error**: Required files not found - {str(e)}")
-        st.error("Please ensure all backend components are properly installed.")
-        raise
-    except Exception as e:
-        st.error(f"**Initialization Error**: Failed to load analyzer - {str(e)}")
-        st.error("Please check the application logs for more details.")
-        raise
-
-
-@st.cache_resource
-def load_model() -> Tuple[object, object]:
-    """
-    Load and cache the trained ML model and TF-IDF vectorizer.
-    
-    This function uses Streamlit's cache_resource decorator to ensure the
-    model and vectorizer are loaded only once per session, improving performance
-    across page reruns.
-    
-    Returns:
-        Tuple[object, object]: Tuple of (model, vectorizer)
-            - model: Trained scikit-learn model (Logistic Regression or Passive Aggressive)
-            - vectorizer: Fitted TF-IDF vectorizer
-        
-    Raises:
-        FileNotFoundError: If model files are missing
-        Exception: If model loading fails
-    """
-    # Define model file paths
-    model_dir = os.path.join(os.path.dirname(__file__), "models")
-    model_path = os.path.join(model_dir, "best_model.joblib")
-    vectorizer_path = os.path.join(model_dir, "tfidf_vectorizer.joblib")
-    
-    try:
-        # Check if model files exist
-        if not os.path.exists(model_path):
-            error_msg = (
-                f"Model file not found at: {model_path}\n\n"
-                "Please train the model first by running:\n"
-                "  python train_model.py\n\n"
-                "This will create the required model files in the 'models/' directory."
-            )
-            st.error(f"**Model File Missing**\n\n{error_msg}")
-            raise FileNotFoundError(error_msg)
-        
-        if not os.path.exists(vectorizer_path):
-            error_msg = (
-                f"Vectorizer file not found at: {vectorizer_path}\n\n"
-                "Please train the model first by running:\n"
-                "  python train_model.py\n\n"
-                "This will create the required vectorizer file in the 'models/' directory."
-            )
-            st.error(f"**Vectorizer File Missing**\n\n{error_msg}")
-            raise FileNotFoundError(error_msg)
-        
-        # Load model and vectorizer
-        model = joblib.load(model_path)
-        vectorizer = joblib.load(vectorizer_path)
-        
-        return model, vectorizer
-        
-    except FileNotFoundError:
-        # Re-raise FileNotFoundError with our custom message
-        raise
-    except Exception as e:
-        error_msg = (
-            f"Failed to load model files: {str(e)}\n\n"
-            "Troubleshooting steps:\n"
-            "1. Verify model files exist in the 'models/' directory\n"
-            "2. Ensure model files are not corrupted\n"
-            "3. Try retraining the model: python train_model.py\n"
-            "4. Check file permissions"
-        )
-        st.error(f"**Model Loading Error**\n\n{error_msg}")
-        raise Exception(error_msg) from e
-
-
-# ============================================================================
-# Input Validation Component
-# ============================================================================
-
-def validate_input(text: str) -> Tuple[bool, str]:
-    """
-    Validate article text input.
-    
-    Checks that the article text meets minimum and maximum length requirements
-    before analysis can proceed.
-    
-    Args:
-        text: The article text to validate
-        
-    Returns:
-        Tuple[bool, str]: Tuple of (is_valid, error_message)
-            - is_valid: True if validation passes, False otherwise
-            - error_message: Empty string if valid, specific error message otherwise
-    """
-    text_length = len(text)
-    
-    # Check minimum length
-    if text_length < UIConfig.MIN_TEXT_LENGTH:
-        return False, "Article text must be at least 50 characters"
-    
-    # Check maximum length
-    if text_length > UIConfig.MAX_TEXT_LENGTH:
-        return False, "Article text must not exceed 50,000 characters"
-    
-    # Validation passed
-    return True, ""
-
-
-class InputValidator:
-    """
-    Validates user input for article text.
-    
-    This class provides an object-oriented interface for input validation
-    with the same validation logic as the validate_input() function.
-    """
-    
-    MIN_LENGTH = 50
-    MAX_LENGTH = 50000
-    
-    @staticmethod
-    def validate(text: str) -> Tuple[bool, str]:
-        """
-        Validate article text length.
-        
-        Checks that the article text meets minimum and maximum length requirements
-        before analysis can proceed.
-        
-        Args:
-            text: Article text to validate
-            
-        Returns:
-            Tuple[bool, str]: Tuple of (is_valid, error_message)
-                - is_valid: True if validation passes, False otherwise
-                - error_message: Empty string if valid, specific error message otherwise
-        """
-        text_length = len(text)
-        
-        # Check minimum length
-        if text_length < InputValidator.MIN_LENGTH:
-            return False, "Article text must be at least 50 characters"
-        
-        # Check maximum length
-        if text_length > InputValidator.MAX_LENGTH:
-            return False, "Article text must not exceed 50,000 characters"
-        
-        # Validation passed
-        return True, ""
-
-
-# ============================================================================
-# Example Articles Component
-# ============================================================================
-
-EXAMPLE_ARTICLES = {
-    "Example Credible Article": """
-Scientists at Stanford University have published a peer-reviewed study in the journal Nature showing that a new vaccine candidate demonstrates 89% efficacy in phase 3 clinical trials involving 30,000 participants across 15 countries.
-
-Dr. Sarah Chen, lead researcher at Stanford's Department of Immunology, stated in a press conference yesterday that the results were "highly encouraging" and that the team plans to submit the data to the FDA for emergency use authorization within the next month.
-
-The study, which began in March 2023, tracked participants for an average of 6 months following vaccination. The research team reported that serious adverse events were rare, occurring in less than 0.1% of participants, and were comparable to rates seen with other approved vaccines.
-
-"This vaccine uses a novel mRNA platform that has been refined based on lessons learned from previous vaccine development efforts," explained Dr. Chen. "The technology allows for rapid adaptation to new variants, which could prove crucial in managing future outbreaks."
-
-The pharmaceutical company funding the research, BioMed Solutions, announced that manufacturing capacity is being scaled up at facilities in three countries to prepare for potential approval. The company has committed to providing doses at cost to low-income countries through partnerships with international health organizations.
-
-Independent experts not involved in the study have praised the rigorous methodology. Dr. Michael Rodriguez, an epidemiologist at Johns Hopkins University, noted that "the sample size is robust, the follow-up period is adequate, and the transparency of the data sharing is commendable."
-
-The full study data has been made available to the scientific community for independent review, and the research team has scheduled presentations at upcoming medical conferences to discuss their findings in detail.
-""",
-    
-    "Example Suspicious Article": """
-SHOCKING DISCOVERY: Government Scientists ADMIT Vaccines Contain Dangerous Chemicals That Big Pharma Doesn't Want You to Know About!!!
-
-An EXPLOSIVE new report reveals that mainstream media has been HIDING the truth about what's really in vaccines. Anonymous sources close to the CDC have leaked documents showing that pharmaceutical companies are adding mysterious substances to vaccines without proper testing.
-
-Experts say this could be the biggest cover-up in medical history! Thousands of people are reporting strange symptoms after vaccination, but doctors are being SILENCED by powerful corporations who control the entire healthcare system.
-
-"They don't want you to know the truth," says one concerned parent who wishes to remain anonymous. "I did my own research online and found dozens of articles explaining how these chemicals are linked to serious health problems. Why isn't the government investigating this?"
-
-Many people are now questioning whether vaccines are safe at all. Some alternative health practitioners suggest that natural immunity is far superior to anything created in a laboratory. One holistic doctor claims that a simple combination of vitamins and herbs can provide better protection than any vaccine.
-
-The pharmaceutical industry makes BILLIONS of dollars from vaccines every year. Is it any wonder they want to keep pushing them on unsuspecting families? Follow the money and you'll see who really benefits from mandatory vaccination programs.
-
-Wake up, people! Don't let them inject you with unknown substances. Do your own research and make informed decisions about your health. Share this article before it gets censored by Big Tech!
-"""
+  /* Text */
+  --on-surface:     #e3e4ea;
+  --on-surface-var: #a9abb5;
+  --outline:        #424754;
 }
 
+*, *::before, *::after { box-sizing: border-box; }
 
-def load_example(example_name: str) -> str:
-    """
-    Load an example article by name.
-    
-    Retrieves the full text of a pre-defined example article for demonstration
-    purposes. Example articles include both credible and suspicious content to
-    showcase the system's analysis capabilities.
-    
-    Args:
-        example_name: Name of the example article (must match a key in EXAMPLE_ARTICLES)
-        
-    Returns:
-        str: Full text of the example article
-        
-    Raises:
-        KeyError: If the example_name is not found in EXAMPLE_ARTICLES
-    """
-    return EXAMPLE_ARTICLES[example_name]
+html, body,
+[data-testid="stAppViewContainer"],
+[data-testid="stApp"] {
+  font-family: 'Inter', sans-serif !important;
+  background: var(--surface) !important;
+  color: var(--on-surface) !important;
+}
+
+/* Ambient glow — red + yellow */
+[data-testid="stAppViewContainer"]::before {
+  content: '';
+  position: fixed; inset: 0;
+  background:
+    radial-gradient(ellipse 55% 35% at 80% 5%,  rgba(230,57,70,.05)  0%, transparent 70%),
+    radial-gradient(ellipse 40% 30% at 10% 90%, rgba(251,191,36,.04) 0%, transparent 70%);
+  pointer-events: none; z-index: 0;
+}
+
+/* hide Streamlit chrome */
+#MainMenu, footer,
+header[data-testid="stHeader"],
+[data-testid="stToolbar"],
+[data-testid="stDecoration"],
+[data-testid="stStatusWidget"],
+[data-testid="stSidebar"] { display: none !important; }
+
+.block-container { padding: 0 !important; max-width: 100% !important; }
+
+/* ── sticky nav ───────────────────────────────────────────────────── */
+.em-nav {
+  position: sticky; top: 0; z-index: 200;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 2.5rem; height: 56px;
+  background: rgba(16,19,26,.88);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-bottom: 1px solid rgba(66,71,84,.18);
+}
+.em-logo {
+  font-size: 1.1rem; font-weight: 900; letter-spacing: -.02em;
+  background: linear-gradient(135deg, var(--red) 0%, var(--yellow) 100%);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.em-logo-sub {
+  font-size: .68rem; font-weight: 500; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--on-surface-var);
+  margin-left: .6rem;
+}
+
+/* ── page wrapper ─────────────────────────────────────────────────── */
+.em-page {
+  max-width: 1100px; margin: 0 auto;
+  padding: 3rem 2rem 6rem;
+}
+
+/* ── hero ─────────────────────────────────────────────────────────── */
+.em-hero { text-align: center; margin-bottom: 2.5rem; }
+.em-hero h1 {
+  font-size: clamp(1.9rem, 4vw, 2.75rem);
+  font-weight: 900; letter-spacing: -.03em; line-height: 1.1;
+  margin-bottom: .65rem;
+}
+.em-hero h1 span {
+  background: linear-gradient(135deg, var(--red) 0%, var(--yellow) 60%, var(--blue) 100%);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.em-hero p {
+  font-size: .88rem; color: var(--on-surface-var);
+  max-width: 480px; margin: 0 auto; line-height: 1.65;
+}
+
+/* ── input card ───────────────────────────────────────────────────── */
+.em-input-card {
+  background: var(--surface-low);
+  border-radius: 1.5rem;
+  padding: 2rem 2.25rem 1.75rem;
+  margin-bottom: 1.5rem;
+}
+
+/* textarea override */
+textarea, .stTextArea textarea {
+  background: var(--surface-high) !important;
+  border: 1px solid rgba(66,71,84,.35) !important;
+  border-radius: .75rem !important;
+  color: var(--on-surface) !important;
+  font-family: 'Inter', sans-serif !important;
+  font-size: .88rem !important; line-height: 1.65 !important;
+  resize: vertical !important;
+  transition: border-color .2s, box-shadow .2s !important;
+}
+textarea:focus, .stTextArea textarea:focus {
+  border-color: var(--red) !important;
+  box-shadow: 0 0 0 3px rgba(230,57,70,.15), 0 2px 0 var(--red) !important;
+  outline: none !important;
+}
+
+/* button override */
+.stButton > button {
+  background: linear-gradient(135deg, var(--red) 0%, var(--yellow) 100%) !important;
+  color: #1a0a00 !important;
+  font-weight: 700 !important; font-family: 'Inter', sans-serif !important;
+  border: none !important; border-radius: 1rem !important;
+  padding: .6rem 1.5rem !important; font-size: .85rem !important;
+  letter-spacing: .01em !important; width: 100% !important;
+  transition: opacity .2s, transform .15s, box-shadow .2s !important;
+  box-shadow: 0 4px 20px rgba(230,57,70,.3) !important;
+}
+.stButton > button:hover {
+  opacity: .92 !important; transform: translateY(-1px) !important;
+  box-shadow: 0 8px 30px rgba(230,57,70,.4) !important;
+}
+.stButton > button:active { transform: translateY(0) !important; }
+
+/* selectbox */
+.stSelectbox > div > div {
+  background: var(--surface-high) !important;
+  border: 1px solid rgba(66,71,84,.35) !important;
+  border-radius: .75rem !important;
+  color: var(--on-surface) !important;
+  font-family: 'Inter', sans-serif !important;
+}
+
+.em-char { font-size: .72rem; color: var(--on-surface-var); margin-top: .4rem; }
+
+/* ── Streamlit tabs ───────────────────────────────────────────────── */
+[data-testid="stTabs"] { background: transparent !important; }
+[data-testid="stTabsTabList"] {
+  background: transparent !important;
+  border-bottom: 1px solid rgba(66,71,84,.20) !important;
+}
+button[data-testid="stTabsTab"] {
+  background: transparent !important; color: var(--on-surface-var) !important;
+  font-family: 'Inter', sans-serif !important; font-size: .875rem !important;
+  font-weight: 500 !important; border: none !important; border-radius: 0 !important;
+  padding: .6rem 1.1rem !important; transition: color .2s !important;
+}
+button[data-testid="stTabsTab"]:hover {
+  color: var(--on-surface) !important;
+  background: rgba(66,71,84,.08) !important;
+}
+button[data-testid="stTabsTab"][aria-selected="true"] {
+  color: var(--on-surface) !important;
+  border-bottom: 2px solid var(--red) !important;
+  margin-bottom: -1px !important;
+}
+[data-testid="stTabsTabPanel"] {
+  padding-top: 1.5rem !important; background: transparent !important;
+}
+
+/* ── stat cards ───────────────────────────────────────────────────── */
+.em-stat {
+  background: var(--surface-high); border-radius: 1.5rem;
+  padding: 1.5rem 1.75rem 1.75rem;
+  position: relative; overflow: hidden; height: 100%;
+}
+.em-stat::before {
+  content: ''; position: absolute; inset: 0; border-radius: inherit;
+  background: linear-gradient(145deg, rgba(255,255,255,.025) 0%, transparent 60%);
+  pointer-events: none;
+}
+.em-stat-icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border-radius: .5rem;
+  font-size: 13px; margin-bottom: .75rem;
+}
+.em-stat-icon.red    { background: rgba(230,57,70,.15); }
+.em-stat-icon.yellow { background: rgba(251,191,36,.15); }
+.em-stat-icon.blue   { background: rgba(59,130,246,.13); }
+.em-stat-lbl {
+  font-size: .62rem; font-weight: 700; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--on-surface-var); margin-bottom: .45rem;
+}
+.em-stat-val {
+  font-size: 1.7rem; font-weight: 800; letter-spacing: -.03em;
+  color: var(--on-surface); margin-bottom: .5rem;
+}
+.em-stat-val.red    { color: var(--red); }
+.em-stat-val.yellow { color: var(--yellow); }
+.em-stat-val.blue   { color: var(--blue-lt); }
+.em-stat-meta { font-size: .74rem; color: var(--on-surface-var); line-height: 1.5; }
+.em-bar {
+  height: 3px; background: rgba(66,71,84,.3); border-radius: 99px; overflow: hidden;
+  margin-top: .85rem;
+}
+.em-bar-fill {
+  height: 100%; border-radius: 99px;
+  background: linear-gradient(90deg, var(--red), var(--yellow));
+  box-shadow: 0 0 8px var(--red-glow);
+}
+.em-chips { display: flex; gap: .45rem; margin-top: .7rem; flex-wrap: wrap; }
+.em-chip {
+  display: inline-flex; align-items: center; gap: .28rem;
+  padding: .18rem .6rem; border-radius: 99px;
+  font-size: .62rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+}
+.em-chip::before {
+  content: ''; width: 5px; height: 5px; border-radius: 50%; background: currentColor;
+}
+.em-chip.verified { background: rgba(59,130,246,.15); color: var(--blue-lt); }
+.em-chip.pending  { background: rgba(251,191,36,.13); color: var(--yellow); }
+
+/* ── article card ─────────────────────────────────────────────────── */
+.em-article-card {
+  background: var(--surface-low); border-radius: 1.5rem; padding: 2rem 2.25rem;
+}
+.em-legend-row {
+  display: flex; align-items: center; gap: 1.25rem;
+  margin-bottom: 1.5rem; padding-bottom: 1rem;
+  border-bottom: 1px solid rgba(66,71,84,.15); flex-wrap: wrap;
+}
+.em-legend-lbl {
+  font-size: .62rem; font-weight: 700; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--on-surface-var); flex-shrink: 0;
+}
+.em-legend-items { display: flex; gap: 1rem; flex-wrap: wrap; }
+.em-legend-item {
+  display: flex; align-items: center; gap: .38rem;
+  font-size: .62rem; font-weight: 700; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--on-surface-var);
+}
+.em-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.em-dot.suspicious { background: var(--red);    box-shadow: 0 0 6px var(--red-glow); }
+.em-dot.emotional  { background: var(--yellow); box-shadow: 0 0 6px var(--yel-glow); }
+.em-dot.credible   { background: var(--blue-lt);box-shadow: 0 0 6px var(--blue-glow); }
+
+.em-article-body { font-size: .88rem; line-height: 1.9; color: var(--on-surface); }
+.em-article-body p { margin-bottom: 1.2rem; }
+.em-article-body p:last-child { margin-bottom: 0; }
+
+.hl { display: inline; padding: .08em .22em; border-radius: .22em; cursor: default; }
+.hl.credible {
+  background: rgba(59,130,246,.12); color: var(--blue-lt);
+  text-decoration: underline; text-decoration-color: rgba(147,197,253,.3);
+  text-underline-offset: 2px;
+}
+.hl.emotional { background: rgba(251,191,36,.13); color: var(--yellow); }
+.hl.suspicious {
+  background: rgba(230,57,70,.13); color: var(--red);
+  text-decoration: line-through; text-decoration-color: rgba(230,57,70,.35);
+}
+
+/* ── summary ──────────────────────────────────────────────────────── */
+.em-summary-card {
+  background: var(--surface-low); border-radius: 1.5rem; padding: 1.75rem 2rem;
+}
+.em-summary-card h3 {
+  font-size: .62rem; font-weight: 700; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--on-surface-var); margin-bottom: 1.25rem;
+}
+.em-signal-row {
+  display: flex; align-items: center; gap: .9rem; margin-bottom: .8rem;
+}
+.em-signal-name {
+  font-size: .78rem; color: var(--on-surface-var); width: 145px; flex-shrink: 0;
+}
+.em-signal-track {
+  flex: 1; height: 4px; background: rgba(66,71,84,.3); border-radius: 99px; overflow: hidden;
+}
+.em-signal-fill { height: 100%; border-radius: 99px; }
+.em-signal-fill.high   { background: linear-gradient(90deg, var(--blue), var(--blue-lt)); }
+.em-signal-fill.medium { background: linear-gradient(90deg, var(--yellow-dk), var(--yellow)); }
+.em-signal-fill.low    { background: linear-gradient(90deg, var(--red-dark), var(--red)); }
+.em-signal-pct {
+  font-size: .74rem; font-weight: 600; color: var(--on-surface);
+  width: 34px; text-align: right; flex-shrink: 0;
+}
+
+.em-verdict-pill {
+  display: inline-flex; align-items: center; gap: .45rem;
+  padding: .5rem 1rem; border-radius: 99px;
+  font-size: .75rem; font-weight: 700; letter-spacing: .04em; margin-top: 1.25rem;
+}
+.em-verdict-pill.real    { background: rgba(59,130,246,.14);  color: var(--blue-lt); box-shadow: 0 0 20px var(--blue-glow); }
+.em-verdict-pill.mid     { background: rgba(251,191,36,.14);  color: var(--yellow);  box-shadow: 0 0 20px var(--yel-glow); }
+.em-verdict-pill.fake    { background: rgba(230,57,70,.16);   color: var(--red);     box-shadow: 0 0 20px var(--red-glow); }
+.em-verdict-pill.unknown { background: rgba(66,71,84,.35);    color: var(--on-surface-var); }
+.em-verdict-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
+
+.em-rec-box {
+  margin-top: 1.25rem; background: rgba(230,57,70,.06);
+  border-radius: 1rem; padding: 1rem 1.15rem; border-left: 3px solid var(--red);
+}
+.em-rec-heading {
+  font-size: .62rem; font-weight: 700; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--red); margin-bottom: .45rem;
+}
+.em-rec-text { font-size: .8rem; color: var(--on-surface-var); line-height: 1.6; }
+
+/* ── technical breakdown ─────────────────────────────────────────── */
+.em-metric-card {
+  background: var(--surface-high); border-radius: 1.5rem;
+  padding: 1.5rem 1.6rem; position: relative; overflow: hidden;
+}
+.em-metric-card::before {
+  content: ''; position: absolute; inset: 0;
+  background: linear-gradient(145deg, rgba(255,255,255,.02) 0%, transparent 55%);
+  pointer-events: none;
+}
+.em-metric-lbl {
+  font-size: .62rem; font-weight: 700; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--on-surface-var); margin-bottom: .5rem;
+}
+.em-metric-val { font-size: 2rem; font-weight: 800; letter-spacing: -.04em; }
+.em-metric-val.blue   { color: var(--blue-lt); text-shadow: 0 0 20px var(--blue-glow); }
+.em-metric-val.yellow { color: var(--yellow);  text-shadow: 0 0 20px var(--yel-glow); }
+.em-metric-val.red    { color: var(--red);     text-shadow: 0 0 20px var(--red-glow); }
+.em-metric-suffix { font-size: 1rem; font-weight: 500; color: var(--on-surface-var); }
+
+.em-pt-wrap { background: var(--surface-low); border-radius: 1.5rem; overflow: hidden; margin-top: 1.25rem; }
+.em-pt-header {
+  display: grid; grid-template-columns: 1fr 110px 80px;
+  padding: .7rem 1.75rem; background: var(--surface-ctr);
+}
+.em-pt-header span {
+  font-size: .62rem; font-weight: 700; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--on-surface-var);
+}
+.em-pt-row {
+  display: grid; grid-template-columns: 1fr 110px 80px;
+  align-items: center; padding: .85rem 1.75rem; gap: 1rem;
+  border-top: 1px solid rgba(66,71,84,.10); transition: background .18s;
+}
+.em-pt-row:hover { background: rgba(66,71,84,.08); }
+.em-pt-name { font-size: .82rem; color: var(--on-surface); }
+.em-pt-mini { height: 4px; background: rgba(66,71,84,.3); border-radius: 99px; overflow: hidden; }
+.em-pt-fill { height: 100%; border-radius: 99px; }
+.em-pt-fill.low    { background: linear-gradient(90deg, var(--red-dark), var(--red)); }
+.em-pt-fill.medium { background: linear-gradient(90deg, var(--yellow-dk), var(--yellow)); }
+.em-pt-fill.ok     { background: linear-gradient(90deg, var(--blue), var(--blue-lt)); }
+.em-badge { display: inline-block; padding: .14rem .52rem; border-radius: 99px; font-size: .62rem; font-weight: 700; letter-spacing: .05em; }
+.em-badge.low    { background: rgba(230,57,70,.16);  color: var(--red); }
+.em-badge.medium { background: rgba(251,191,36,.14); color: var(--yellow); }
+.em-badge.ok     { background: rgba(59,130,246,.13); color: var(--blue-lt); }
+
+/* ── claims ───────────────────────────────────────────────────────── */
+.em-claim {
+  background: var(--surface-low); border-radius: 1rem;
+  padding: 1.1rem 1.35rem; border-left: 3px solid var(--red); margin-bottom: .9rem;
+}
+.em-claim-num {
+  font-size: .62rem; font-weight: 700; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--red); margin-bottom: .4rem;
+}
+.em-claim-text { font-size: .84rem; color: var(--on-surface); font-style: italic; line-height: 1.65; }
+.em-no-claims {
+  background: rgba(59,130,246,.06); border-radius: 1rem;
+  padding: 1.25rem 1.5rem; border-left: 3px solid var(--blue);
+  font-size: .84rem; color: var(--on-surface-var); line-height: 1.6;
+}
+
+/* ── explain box ──────────────────────────────────────────────────── */
+.em-explain {
+  background: var(--surface-low); border-radius: 1.25rem;
+  padding: 1.5rem 1.75rem; font-size: .86rem; color: var(--on-surface-var);
+  line-height: 1.75; margin-bottom: 1.1rem;
+}
+.em-action-box { border-radius: 1.25rem; padding: 1.25rem 1.5rem; font-size: .86rem; line-height: 1.65; }
+.em-action-box.high-risk   { background: rgba(230,57,70,.10); border-left: 3px solid var(--red);    color: var(--red); }
+.em-action-box.medium-risk { background: rgba(251,191,36,.10); border-left: 3px solid var(--yellow); color: var(--yellow); }
+.em-action-box.low-risk    { background: rgba(59,130,246,.08); border-left: 3px solid var(--blue);   color: var(--blue-lt); }
+
+/* ── empty state ─────────────────────────────────────────────────── */
+.em-empty { text-align: center; padding: 4rem 2rem; color: var(--on-surface-var); }
+.em-empty-icon { font-size: 3rem; margin-bottom: 1rem; opacity: .35; }
+.em-empty-text { font-size: .9rem; line-height: 1.65; max-width: 380px; margin: 0 auto; }
+
+/* ── footer ───────────────────────────────────────────────────────── */
+.em-footer {
+  margin-top: 4rem; display: flex; align-items: center;
+  justify-content: space-between; padding: 1.5rem 0;
+  border-top: 1px solid rgba(66,71,84,.14);
+  font-size: .72rem; color: var(--on-surface-var); flex-wrap: wrap; gap: 1rem;
+}
+.em-footer-logo {
+  font-size: .95rem; font-weight: 900; letter-spacing: -.01em;
+  background: linear-gradient(135deg, var(--red) 0%, var(--yellow) 100%);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+}
+
+/* scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--surface-low); }
+::-webkit-scrollbar-thumb { background: var(--outline); border-radius: 99px; }
+</style>
+""", unsafe_allow_html=True)
 
 
-# ============================================================================
-# Input Panel Rendering
-# ============================================================================
+# ══════════════════════════════════════════════════════════════════════════════
+#  HELPERS
+# ══════════════════════════════════════════════════════════════════════════════
 
-def render_input_panel() -> str:
-    """
-    Render the left column input panel.
-    
-    Displays a text area for article input, character count, example article
-    selector, analyze button, and help text. This function handles all user
-    input interactions for the analysis workflow.
-    
-    Returns:
-        str: The article text entered by the user (empty string if no input)
-    """
-    st.header("Article Input")
-    
-    # Help text explaining input requirements
+@st.cache_resource
+def load_model():
+    model_dir = os.path.join(os.path.dirname(__file__), "models")
+    mp = os.path.join(model_dir, "best_model.joblib")
+    vp = os.path.join(model_dir, "tfidf_vectorizer.joblib")
+    if not os.path.exists(mp) or not os.path.exists(vp):
+        raise FileNotFoundError(
+            "Model files not found in models/. Run `python train_model.py` first."
+        )
+    return joblib.load(mp), joblib.load(vp)
+
+
+@st.cache_resource
+def load_analyzer():
+    return CredibilityAnalyzer()
+
+
+EXAMPLES = {
+    "Credible — Vaccine Clinical Trial": """Scientists at Stanford University have published a peer-reviewed study in the journal Nature showing that a new vaccine candidate demonstrates 89% efficacy in phase 3 clinical trials involving 30,000 participants across 15 countries.
+
+Dr. Sarah Chen, lead researcher at Stanford's Department of Immunology, stated that the results would be submitted to the FDA for emergency use authorization within the next month.
+
+The study tracked participants for an average of 6 months following vaccination. The research team reported that serious adverse events occurred in less than 0.1% of participants, comparable to rates seen with other approved vaccines.
+
+Independent experts praised the rigorous methodology. Dr. Michael Rodriguez, an epidemiologist at Johns Hopkins University, noted that the sample size is robust and the data sharing is commendable.""",
+
+    "Suspicious — Conspiracy Article": """SHOCKING DISCOVERY: Government Scientists ADMIT Vaccines Contain Dangerous Chemicals That Big Pharma Doesn't Want You to Know About!!!
+
+An EXPLOSIVE new report reveals that mainstream media has been HIDING the truth. Anonymous sources close to the CDC have leaked documents showing that pharmaceutical companies are adding mysterious substances to vaccines without proper testing.
+
+Experts say this could be the biggest cover-up in medical history! Many believe doctors are being SILENCED by powerful corporations who control the entire healthcare system.
+
+They don't want you to know the truth. Wake up, people! Don't let them inject you with unknown substances. Share this before it gets censored!""",
+}
+
+MIN_LEN, MAX_LEN = 50, 50_000
+
+
+# ── HTML component builders ────────────────────────────────────────────────
+
+def ring_html(score: int, classification: str) -> str:
+    colors = {
+        "REAL":       ("#3b82f6", "#93c5fd"),
+        "MISLEADING": ("#d97706", "#fbbf24"),
+        "FAKE":       ("#b71c2c", "#e63946"),
+        "UNVERIFIED": ("#424754", "#a9abb5"),
+    }
+    c1, c2 = colors.get(classification, colors["UNVERIFIED"])
+    circ = 2 * 3.14159 * 86
+    offset = circ * (1 - score / 100)
+    return f"""
+<div style="display:flex;justify-content:center;margin:1.5rem 0 2rem">
+ <div style="position:relative;width:200px;height:200px">
+  <svg viewBox="0 0 200 200" width="200" height="200"
+       style="position:absolute;inset:0;transform:rotate(-90deg);
+              filter:drop-shadow(0 0 18px {c1}55)">
+   <defs>
+    <linearGradient id="rg" x1="0%" y1="0%" x2="100%" y2="100%">
+     <stop offset="0%" stop-color="{c1}"/>
+     <stop offset="100%" stop-color="{c2}"/>
+    </linearGradient>
+   </defs>
+   <circle cx="100" cy="100" r="86" fill="none" stroke="rgba(66,71,84,.25)" stroke-width="10"/>
+   <circle cx="100" cy="100" r="86" fill="none" stroke="url(#rg)" stroke-width="10"
+           stroke-linecap="round"
+           stroke-dasharray="{circ:.1f}" stroke-dashoffset="{offset:.1f}"/>
+  </svg>
+  <div style="position:absolute;inset:0;display:flex;flex-direction:column;
+              align-items:center;justify-content:center">
+   <div style="font-size:2.6rem;font-weight:900;letter-spacing:-.04em;
+               background:linear-gradient(135deg,{c2} 0%,{c1} 100%);
+               -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+               background-clip:text;line-height:1">{score}%</div>
+   <div style="font-size:.62rem;font-weight:700;letter-spacing:.12em;
+               text-transform:uppercase;color:#a9abb5;margin-top:.35rem">
+    {classification}
+   </div>
+  </div>
+ </div>
+</div>"""
+
+
+def stat_ml(confidence: int) -> str:
+    label = "High Accuracy" if confidence >= 75 else "Moderate Accuracy"
+    return f"""<div class="em-stat">
+  <div class="em-stat-icon blue">🧠</div>
+  <div class="em-stat-lbl">ML Prediction</div>
+  <div class="em-stat-val blue">{label}</div>
+  <div class="em-bar"><div class="em-bar-fill" style="width:{confidence}%"></div></div>
+</div>"""
+
+
+def stat_patterns(anomalies: int, meta: str) -> str:
+    cls = "yellow" if anomalies > 0 else ""
+    return f"""<div class="em-stat">
+  <div class="em-stat-icon yellow">⚠</div>
+  <div class="em-stat-lbl">Pattern Detection</div>
+  <div class="em-stat-val {cls}">{anomalies} Anomali{'es' if anomalies != 1 else 'y'}</div>
+  <div class="em-stat-meta">{meta}</div>
+</div>"""
+
+
+def stat_claims(total: int, verified: int, pending: int) -> str:
+    return f"""<div class="em-stat">
+  <div class="em-stat-icon red">📋</div>
+  <div class="em-stat-lbl">Flagged Claims</div>
+  <div class="em-stat-val red">{total} Detected</div>
+  <div class="em-chips">
+    <span class="em-chip verified">{verified} Verified</span>
+    <span class="em-chip pending">{pending} Pending</span>
+  </div>
+</div>"""
+
+
+def verdict_pill(classification: str, score: int) -> str:
+    if score >= 75:
+        cls, label = "real",    "High Credibility"
+    elif score >= 40:
+        cls, label = "mid",     "Moderate Credibility"
+    elif classification == "UNVERIFIED":
+        cls, label = "unknown", "Unverified"
+    else:
+        cls, label = "fake",    "Low Credibility"
+    return f'<span class="em-verdict-pill {cls}"><span class="em-verdict-dot"></span>{label}</span>'
+
+
+def signal_bar(name: str, pct: int, level: str) -> str:
+    return f"""<div class="em-signal-row">
+  <span class="em-signal-name">{name}</span>
+  <div class="em-signal-track">
+    <div class="em-signal-fill {level}" style="width:{pct}%"></div>
+  </div>
+  <span class="em-signal-pct">{pct}%</span>
+</div>"""
+
+
+def pt_row(name: str, width: int, level: str) -> str:
+    badge = {"low": "High", "medium": "Moderate", "ok": "Clean"}.get(level, "—")
+    return f"""<div class="em-pt-row">
+  <span class="em-pt-name">{name}</span>
+  <div class="em-pt-mini"><div class="em-pt-fill {level}" style="width:{width}%"></div></div>
+  <span class="em-badge {level}">{badge}</span>
+</div>"""
+
+
+def count_anomalies(p: Dict) -> int:
+    return sum([
+        p.get("sensational_phrases", 0) > 3,
+        p.get("excessive_caps", 0) > 0.1,
+        p.get("vague_sources", 0) > 2,
+        p.get("conspiracy_framing", 0) > 0,
+        p.get("emotional_manipulation", 0) > 2,
+        p.get("one_sided", 0) > 0.7,
+        p.get("no_evidence", 0) > 0.7,
+        p.get("extreme_adjectives", 0) > 5,
+        p.get("clickbait", 0) > 0,
+    ])
+
+
+def plevel(v: float, lo=.35, hi=.65) -> str:
+    if v >= hi: return "low"
+    if v >= lo: return "medium"
+    return "ok"
+
+
+def build_article_html(text: str, suspicious: List[str]) -> str:
+    import html as hl
+    safe = hl.escape(text)
+    for claim in suspicious:
+        sc = hl.escape(claim.strip())
+        if sc and sc in safe:
+            safe = safe.replace(sc, f'<span class="hl suspicious">{sc}</span>', 1)
+    paras = safe.split("\n\n") if "\n\n" in safe else safe.split("\n")
+    return "".join(f"<p>{p.strip()}</p>" for p in paras if p.strip())
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  RENDER
+# ══════════════════════════════════════════════════════════════════════════════
+
+def render_nav():
     st.markdown("""
-    **How to use:**
-    - Paste or type an article (minimum 50 characters, maximum 50,000 characters)
-    - Or select an example article from the dropdown below
-    - Click "Analyze Article" to see the credibility assessment
-    """)
-    
-    # Example article selector
-    st.subheader("Load Example Article")
-    example_options = ["-- Select an example --"] + list(EXAMPLE_ARTICLES.keys())
-    selected_example = st.selectbox(
-        "Choose an example to analyze:",
-        options=example_options,
-        key="example_selector"
-    )
-    
-    # Initialize article text from session state or empty
+<nav class="em-nav">
+  <div style="display:flex;align-items:center">
+    <span class="em-logo">El Matador</span>
+    <span class="em-logo-sub">News Credibility Analyzer</span>
+  </div>
+</nav>""", unsafe_allow_html=True)
+
+
+def render_hero():
+    st.markdown("""
+<div class="em-hero">
+  <h1><span>Analysis Results</span></h1>
+  <p>Real-time breakdown of linguistic patterns, factual claims, and overall credibility signals.</p>
+</div>""", unsafe_allow_html=True)
+
+
+def render_input() -> Tuple[str, bool]:
+    st.markdown('<div class="em-input-card">', unsafe_allow_html=True)
+
+    opts = ["— Paste your own article —"] + list(EXAMPLES.keys())
+    sel = st.selectbox("Load example", opts, key="ex_pick", label_visibility="collapsed")
+    if sel != opts[0]:
+        st.session_state.article_text = EXAMPLES[sel]
+
     if "article_text" not in st.session_state:
         st.session_state.article_text = ""
-    
-    # Load example article if selected
-    if selected_example != "-- Select an example --":
-        st.session_state.article_text = load_example(selected_example)
-    
-    # Text area for article input
-    st.subheader("Article Text")
-    article_text = st.text_area(
-        "Enter or paste article text here:",
-        value=st.session_state.article_text,
-        height=UIConfig.TEXT_AREA_HEIGHT,
-        key="article_input",
-        placeholder="Paste your article text here..."
+
+    text = st.text_area(
+        "Article", value=st.session_state.article_text,
+        height=220, key="article_input",
+        placeholder="Paste news article text here (minimum 50 characters)…",
+        label_visibility="collapsed",
     )
-    
-    # Update session state with current text
-    st.session_state.article_text = article_text
-    
-    # Display character count
-    char_count = len(article_text)
-    if char_count < UIConfig.MIN_TEXT_LENGTH:
-        st.caption(f"Character count: {char_count} / {UIConfig.MIN_TEXT_LENGTH} minimum")
-    elif char_count > UIConfig.MAX_TEXT_LENGTH:
-        st.caption(f"Character count: {char_count} / {UIConfig.MAX_TEXT_LENGTH} maximum (exceeded)")
-    else:
-        st.caption(f"Character count: {char_count}")
-    
-    # Display validation warnings
-    if char_count > 0:  # Only show warnings if user has entered text
-        is_valid, error_message = validate_input(article_text)
-        if not is_valid:
-            st.warning(f"{error_message}")
-    
-    # Analyze button
-    st.markdown("---")
-    
-    # Check if analysis is in progress
-    is_analyzing = st.session_state.get("analyzing", False)
-    
-    analyze_button = st.button(
-        "Analyze Article",
-        type="primary",
-        use_container_width=True,
-        disabled=(char_count < UIConfig.MIN_TEXT_LENGTH or char_count > UIConfig.MAX_TEXT_LENGTH or is_analyzing)
-    )
-    
-    # Store button state in session state for use in main()
-    if "analyze_clicked" not in st.session_state:
-        st.session_state.analyze_clicked = False
-    
-    if analyze_button:
-        st.session_state.analyze_clicked = True
-    
-    return article_text
+    st.session_state.article_text = text
+
+    n = len(text)
+    if 0 < n < MIN_LEN:
+        st.markdown(f'<div class="em-char" style="color:var(--red)">'
+                    f'{n} / {MIN_LEN} minimum characters required</div>',
+                    unsafe_allow_html=True)
+    elif n > 0:
+        st.markdown(f'<div class="em-char">{n:,} characters</div>', unsafe_allow_html=True)
+
+    st.markdown("</div>", unsafe_allow_html=True)
+    clicked = st.button("Analyze Article →", disabled=(n < MIN_LEN or n > MAX_LEN), key="btn_analyze")
+    return text, clicked
 
 
-# ============================================================================
-# Results Display Components
-# ============================================================================
+def render_results(result: Dict, text: str):
+    cls   = result["classification"]
+    score = result["credibility_score"]
+    conf  = result["confidence"]
+    risk  = result["risk_level"]
+    pats  = result.get("patterns", {})
+    susp  = result.get("suspicious_claims", [])
+    inds  = result.get("key_indicators", [])
+    tone  = result.get("emotional_tone", "N/A")
+    summ  = result.get("analysis_summary", "")
+    expl  = result.get("explanation", "")
+    rec   = result.get("recommended_action", "")
+    pscore = result.get("pattern_score", 0.0)
+    anomalies = count_anomalies(pats)
 
-def render_verdict_summary(result: Dict):
-    """
-    Render the verdict summary section.
-    
-    Displays the primary classification result, credibility score, risk level,
-    model confidence, and analysis summary with appropriate color coding.
-    
-    Args:
-        result: Analysis result dictionary from CredibilityAnalyzer.analyze()
-            Expected keys: classification, credibility_score, risk_level,
-            confidence, analysis_summary
-    """
-    st.subheader("Verdict Summary")
-    
-    # Get values from result dictionary
-    classification = result.get("classification", "UNVERIFIED")
-    credibility_score = result.get("credibility_score", 0)
-    risk_level = result.get("risk_level", "High Risk")
-    confidence = result.get("confidence", 0)
-    analysis_summary = result.get("analysis_summary", "")
-    
-    # Map classification to colors
-    classification_colors = {
-        "REAL": UIConfig.COLOR_REAL,
-        "FAKE": UIConfig.COLOR_FAKE,
-        "MISLEADING": UIConfig.COLOR_MISLEADING,
-        "UNVERIFIED": UIConfig.COLOR_UNVERIFIED
-    }
-    classification_color = classification_colors.get(classification, UIConfig.COLOR_UNVERIFIED)
-    
-    # Map risk level to colors
-    risk_colors = {
-        "Low Risk": UIConfig.COLOR_LOW_RISK,
-        "Medium Risk": UIConfig.COLOR_MEDIUM_RISK,
-        "High Risk": UIConfig.COLOR_HIGH_RISK
-    }
-    risk_color = risk_colors.get(risk_level, UIConfig.COLOR_HIGH_RISK)
-    
-    # Display classification label with color coding and text alternative
-    # Text alternative for accessibility: Classification is also shown in plain text
-    st.markdown(
-        f"""
-        <div style="text-align: center; padding: 20px; background-color: {classification_color}15; border-radius: 10px; border: 2px solid {classification_color};">
-            <h2 style="color: {classification_color}; margin: 0; font-size: 2.5em;">{classification}</h2>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-    
+    # Ring
+    st.markdown(ring_html(score, cls), unsafe_allow_html=True)
+
+    # Stat cards
+    c1, c2, c3 = st.columns(3, gap="medium")
+    meta = (", ".join(inds[:2]) if inds else "No major anomalies detected.")[:80]
+    verified = max(0, len(susp) - len([s for s in susp if "vague" in s.lower()]))
+    pending  = len(susp) - verified
+    with c1: st.markdown(stat_ml(conf), unsafe_allow_html=True)
+    with c2: st.markdown(stat_patterns(anomalies, meta), unsafe_allow_html=True)
+    with c3: st.markdown(stat_claims(len(susp), verified, pending), unsafe_allow_html=True)
+
     st.markdown("<br>", unsafe_allow_html=True)
-    
-    # Create three columns for metrics
-    metric_col1, metric_col2, metric_col3 = st.columns(3)
-    
-    # Display credibility score as large number with "/100" suffix
-    # Text alternative: "Credibility Score" label provides context
-    with metric_col1:
-        st.markdown(
-            f"""
-            <div style="text-align: center; padding: 15px;">
-                <div style="font-size: 0.9em; color: #666; margin-bottom: 5px;">Credibility Score</div>
-                <div style="font-size: 3em; font-weight: bold; color: {classification_color};">{credibility_score}<span style="font-size: 0.5em; color: #999;">/100</span></div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-    
-    # Display risk level with color-coded badge and text label
-    # Text alternative: Risk level text ("Low Risk", "Medium Risk", "High Risk") is always visible
-    with metric_col2:
-        st.markdown(
-            f"""
-            <div style="text-align: center; padding: 15px;">
-                <div style="font-size: 0.9em; color: #666; margin-bottom: 5px;">Risk Level</div>
-                <div style="margin-top: 10px;">
-                    <span style="background-color: {risk_color}; color: white; padding: 10px 20px; border-radius: 20px; font-size: 1.2em; font-weight: bold; display: inline-block;">{risk_level}</span>
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-    
-    # Display model confidence percentage
-    with metric_col3:
-        st.markdown(
-            f"""
-            <div style="text-align: center; padding: 15px;">
-                <div style="font-size: 0.9em; color: #666; margin-bottom: 5px;">Model Confidence</div>
-                <div style="font-size: 3em; font-weight: bold; color: #333;">{confidence}<span style="font-size: 0.5em; color: #999;">%</span></div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-    
-    st.markdown("<br>", unsafe_allow_html=True)
-    
-    # Display analysis summary text
-    st.markdown("**Analysis Summary:**")
-    st.info(analysis_summary)
 
+    # ── Tabs ──────────────────────────────────────────────────────────────
+    t1, t2, t3 = st.tabs(["Summary", "Highlighted Article", "Technical Breakdown"])
 
-def render_model_details(result: Dict):
-    """
-    Render the model prediction details section (expandable).
-    
-    Displays technical details about the ML model's prediction including raw
-    prediction value, confidence score, pattern score, and key indicators.
-    This section is organized in an expandable container for researchers and
-    advanced users.
-    
-    Args:
-        result: Analysis result dictionary from CredibilityAnalyzer.analyze()
-            Expected keys: model_prediction, confidence, pattern_score, key_indicators
-    """
-    with st.expander("Model Prediction Details", expanded=False):
-        st.markdown("**Technical details for researchers and advanced users**")
-        st.markdown("---")
-        
-        # Get values from result dictionary
-        model_prediction = result.get("model_prediction", 0)
-        confidence = result.get("confidence", 0)
-        pattern_score = result.get("pattern_score", 0.0)
-        key_indicators = result.get("key_indicators", [])
-        
-        # Display raw model prediction with interpretation
-        st.markdown("**Raw Model Prediction:**")
-        prediction_interpretation = "REAL (1)" if model_prediction == 1 else "FAKE (0)"
-        prediction_color = UIConfig.COLOR_REAL if model_prediction == 1 else UIConfig.COLOR_FAKE
-        
-        st.markdown(
-            f"""
-            <div style="padding: 10px; background-color: {prediction_color}15; border-left: 4px solid {prediction_color}; border-radius: 5px;">
-                <span style="font-size: 1.2em; font-weight: bold; color: {prediction_color};">{prediction_interpretation}</span>
-                <br>
-                <span style="font-size: 0.9em; color: #666;">
-                    The ML model classified this article as <strong>{"credible" if model_prediction == 1 else "not credible"}</strong> based on linguistic patterns learned from training data.
-                </span>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-        
-        st.markdown("<br>", unsafe_allow_html=True)
-        
-        # Display model confidence score as percentage
-        st.markdown("**Model Confidence Score:**")
-        st.markdown(
-            f"""
-            <div style="padding: 10px; background-color: #f0f0f0; border-radius: 5px;">
-                <span style="font-size: 1.5em; font-weight: bold; color: #333;">{confidence}%</span>
-                <br>
-                <span style="font-size: 0.9em; color: #666;">
-                    The model's confidence in its prediction. Higher values indicate stronger certainty.
-                </span>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-        
-        st.markdown("<br>", unsafe_allow_html=True)
-        
-        # Display pattern score with explanation
-        st.markdown("**Pattern Score:**")
-        pattern_score_percentage = int(pattern_score * 100)
-        
-        # Determine pattern score interpretation
-        if pattern_score < 0.3:
-            pattern_interpretation = "Low suspicious pattern density - article shows few red flags"
-            pattern_color = UIConfig.COLOR_REAL
-        elif pattern_score < 0.6:
-            pattern_interpretation = "Moderate suspicious pattern density - some concerning indicators present"
-            pattern_color = UIConfig.COLOR_MEDIUM_RISK
+    # ── Summary ──────────────────────────────────────────────────────────
+    with t1:
+        left, right = st.columns([1.4, 1], gap="medium")
+
+        with left:
+            ps = int((1 - pscore) * 100)
+            em = int(min(1, pats.get("emotional_manipulation", 0) / 4) * 100)
+            vg = int(min(1, pats.get("vague_sources", 0) / 3) * 100)
+            ev = int((1 - pats.get("no_evidence", 0)) * 100)
+            co = int(min(1, pats.get("conspiracy_framing", 0) / 2) * 100)
+            bl = int((1 - pats.get("one_sided", 0)) * 100)
+
+            def lvl(v, inv=False):
+                vn = v / 100
+                if inv: return "high" if vn >= .65 else ("medium" if vn >= .4 else "low")
+                return "low" if vn >= .65 else ("medium" if vn >= .35 else "ok")
+
+            bars = (
+                signal_bar("Source Credibility",  ps, "high" if ps >= 65 else ("medium" if ps >= 40 else "low")) +
+                signal_bar("Emotional Language",   em, "low"  if em >= 65 else ("medium" if em >= 35 else "ok")) +
+                signal_bar("Vague Attribution",    vg, "low"  if vg >= 65 else ("medium" if vg >= 35 else "ok")) +
+                signal_bar("Evidence Density",     ev, "high" if ev >= 65 else ("medium" if ev >= 40 else "low")) +
+                signal_bar("Conspiracy Framing",   co, "low"  if co >= 65 else ("medium" if co >= 35 else "ok")) +
+                signal_bar("Narrative Balance",    bl, "high" if bl >= 65 else ("medium" if bl >= 40 else "low"))
+            )
+            st.markdown(f"""<div class="em-summary-card">
+  <h3>Signal Breakdown</h3>{bars}{verdict_pill(cls, score)}
+</div>""", unsafe_allow_html=True)
+
+        with right:
+            if "neutral" in tone.lower():
+                tone_cls = "real"
+            elif "highly" in tone.lower():
+                tone_cls = "fake"
+            else:
+                tone_cls = "mid"
+            st.markdown(f"""<div class="em-summary-card">
+  <h3>Assessment</h3>
+  <p style="font-size:.85rem;color:var(--on-surface-var);line-height:1.7;margin-bottom:1rem">{summ}</p>
+  <div class="em-rec-box">
+    <div class="em-rec-heading">Recommendation</div>
+    <div class="em-rec-text">{rec}</div>
+  </div>
+  <div style="margin-top:1.35rem">
+    <div style="font-size:.62rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
+                color:var(--on-surface-var);margin-bottom:.65rem">Emotional Tone</div>
+    <span class="em-verdict-pill {tone_cls}">
+      <span class="em-verdict-dot"></span>{tone}
+    </span>
+  </div>
+</div>""", unsafe_allow_html=True)
+
+    # ── Highlighted Article ───────────────────────────────────────────────
+    with t2:
+        body = build_article_html(text, susp)
+        st.markdown(f"""<div class="em-article-card">
+  <div class="em-legend-row">
+    <span class="em-legend-lbl">Legend:</span>
+    <div class="em-legend-items">
+      <span class="em-legend-item"><span class="em-dot suspicious"></span>Suspicious</span>
+      <span class="em-legend-item"><span class="em-dot emotional"></span>Emotional</span>
+      <span class="em-legend-item"><span class="em-dot credible"></span>Credible</span>
+    </div>
+  </div>
+  <div class="em-article-body">{body}</div>
+</div>""", unsafe_allow_html=True)
+
+    # ── Technical Breakdown ───────────────────────────────────────────────
+    with t3:
+        m1, m2, m3 = st.columns(3, gap="medium")
+        with m1:
+            st.markdown(f"""<div class="em-metric-card">
+  <div class="em-metric-lbl">Model Confidence</div>
+  <div class="em-metric-val blue">{conf}<span class="em-metric-suffix">%</span></div>
+</div>""", unsafe_allow_html=True)
+        with m2:
+            st.markdown(f"""<div class="em-metric-card">
+  <div class="em-metric-lbl">Pattern Score</div>
+  <div class="em-metric-val yellow">{pscore:.2f}</div>
+</div>""", unsafe_allow_html=True)
+        with m3:
+            st.markdown(f"""<div class="em-metric-card">
+  <div class="em-metric-lbl">Suspicious Claims</div>
+  <div class="em-metric-val red">{len(susp)}</div>
+</div>""", unsafe_allow_html=True)
+
+        def prow(key, label, maxv, invert=False):
+            raw = pats.get(key, 0)
+            pct = int(min(100, (raw / maxv) * 100)) if maxv else 0
+            lvl = plevel(pct / 100)
+            if invert:
+                lvl = {"low": "ok", "ok": "low", "medium": "medium"}.get(lvl, lvl)
+                pct = 100 - pct
+            return pt_row(label, pct, lvl)
+
+        rows = "".join([
+            prow("sensational_phrases",    "Sensational Language",    5),
+            prow("vague_sources",          "Vague Source References", 3),
+            prow("conspiracy_framing",     "Conspiracy Framing",      2),
+            prow("no_evidence",            "Evidence Density",        1, invert=True),
+            prow("emotional_manipulation", "Emotional Manipulation",  4),
+            prow("excessive_caps",         "Excessive Capitalization",0.3),
+            prow("clickbait",              "Clickbait Patterns",      2),
+            prow("one_sided",              "One-Sided Narrative",     1),
+        ])
+        st.markdown(f"""<div class="em-pt-wrap">
+  <div class="em-pt-header"><span>Pattern</span><span>Intensity</span><span>Rating</span></div>
+  {rows}
+</div>""", unsafe_allow_html=True)
+
+        # Flagged claims
+        st.markdown("<br><div style='font-size:.62rem;font-weight:700;letter-spacing:.1em;"
+                    "text-transform:uppercase;color:var(--on-surface-var);margin-bottom:.85rem'>"
+                    "Flagged Claims</div>", unsafe_allow_html=True)
+        if susp:
+            st.markdown("".join(
+                f'<div class="em-claim"><div class="em-claim-num">Claim #{i+1}</div>'
+                f'<div class="em-claim-text">"{c.strip()}"</div></div>'
+                for i, c in enumerate(susp[:5])
+            ), unsafe_allow_html=True)
         else:
-            pattern_interpretation = "High suspicious pattern density - multiple red flags detected"
-            pattern_color = UIConfig.COLOR_FAKE
-        
-        st.markdown(
-            f"""
-            <div style="padding: 10px; background-color: {pattern_color}15; border-left: 4px solid {pattern_color}; border-radius: 5px;">
-                <span style="font-size: 1.5em; font-weight: bold; color: {pattern_color};">{pattern_score_percentage}%</span>
-                <br>
-                <span style="font-size: 0.9em; color: #666;">
-                    {pattern_interpretation}
-                </span>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-        
+            st.markdown('<div class="em-no-claims">No highly suspicious claims detected. '
+                        'Always verify important claims through authoritative sources.</div>',
+                        unsafe_allow_html=True)
+
+        # Explanation
         st.markdown("<br>", unsafe_allow_html=True)
-        
-        # Display all key indicators as bulleted list
-        st.markdown("**Key Indicators:**")
-        if key_indicators:
-            for indicator in key_indicators:
-                st.markdown(f"• {indicator}")
-        else:
-            st.markdown("• No specific indicators identified")
+        action_cls = {"High Risk": "high-risk", "Medium Risk": "medium-risk", "Low Risk": "low-risk"}.get(risk, "medium-risk")
+        st.markdown(f"""<div style="font-size:.62rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
+color:var(--on-surface-var);margin-bottom:.85rem">Detailed Explanation</div>
+<div class="em-explain">{expl}</div>
+<div class="em-action-box {action_cls}">{rec}</div>""", unsafe_allow_html=True)
 
 
-def render_pattern_analysis(patterns: Dict):
-    """
-    Render the linguistic pattern analysis section.
-    
-    Displays all 9 pattern metrics from the PatternDetector in a structured
-    table format. Ratios and scores are formatted as percentages for clarity.
-    
-    Args:
-        patterns: Pattern detection results dictionary with keys:
-            - sensational_phrases: Count of sensational keywords
-            - excessive_caps: Ratio of excessively capitalized words (0.0-1.0)
-            - vague_sources: Count of vague source references
-            - conspiracy_framing: Count of conspiracy keywords
-            - emotional_manipulation: Count of emotional manipulation keywords
-            - one_sided: Score indicating one-sided narrative (0.0-1.0)
-            - no_evidence: Score indicating lack of evidence (0.0-1.0)
-            - extreme_adjectives: Count of extreme adjectives
-            - clickbait: Count of clickbait patterns
-    """
-    st.subheader("Linguistic Pattern Analysis")
-    st.markdown("Detailed breakdown of linguistic patterns detected in the article:")
-    
-    # Extract pattern values with defaults
-    sensational_phrases = patterns.get("sensational_phrases", 0)
-    excessive_caps = patterns.get("excessive_caps", 0.0)
-    vague_sources = patterns.get("vague_sources", 0)
-    conspiracy_framing = patterns.get("conspiracy_framing", 0)
-    emotional_manipulation = patterns.get("emotional_manipulation", 0)
-    one_sided = patterns.get("one_sided", 0.0)
-    no_evidence = patterns.get("no_evidence", 0.0)
-    extreme_adjectives = patterns.get("extreme_adjectives", 0)
-    clickbait = patterns.get("clickbait", 0)
-    
-    # Convert ratios and scores to percentages
-    excessive_caps_pct = f"{excessive_caps * 100:.1f}%"
-    one_sided_pct = f"{one_sided * 100:.1f}%"
-    no_evidence_pct = f"{no_evidence * 100:.1f}%"
-    
-    # Create a structured table using Streamlit's native table or dataframe
-    # We'll use a more visual approach with columns for better readability
-    
-    st.markdown("---")
-    
-    # Row 1: Sensational Phrases, Excessive Caps, Vague Sources
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        st.metric(
-            label="Sensational Phrases",
-            value=sensational_phrases,
-            help="Count of sensational keywords (e.g., SHOCKING, BREAKING, EXPOSED)"
-        )
-    
-    with col2:
-        st.metric(
-            label="Excessive Capitalization",
-            value=excessive_caps_pct,
-            help="Ratio of excessively capitalized words in the text"
-        )
-    
-    with col3:
-        st.metric(
-            label="Vague Sources",
-            value=vague_sources,
-            help="Count of vague source references (e.g., 'sources say', 'experts claim')"
-        )
-    
-    st.markdown("<br>", unsafe_allow_html=True)
-    
-    # Row 2: Conspiracy Framing, Emotional Manipulation, One-Sided Score
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        st.metric(
-            label="Conspiracy Framing",
-            value=conspiracy_framing,
-            help="Count of conspiracy-related keywords (e.g., 'cover-up', 'hidden truth')"
-        )
-    
-    with col2:
-        st.metric(
-            label="Emotional Manipulation",
-            value=emotional_manipulation,
-            help="Count of emotionally manipulative keywords (e.g., 'outrage', 'terrifying')"
-        )
-    
-    with col3:
-        st.metric(
-            label="One-Sided Narrative",
-            value=one_sided_pct,
-            help="Score indicating lack of balanced perspectives (0% = balanced, 100% = one-sided)"
-        )
-    
-    st.markdown("<br>", unsafe_allow_html=True)
-    
-    # Row 3: No Evidence Score, Extreme Adjectives, Clickbait Patterns
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        st.metric(
-            label="Lack of Evidence",
-            value=no_evidence_pct,
-            help="Score indicating absence of evidence-based claims (0% = well-evidenced, 100% = no evidence)"
-        )
-    
-    with col2:
-        st.metric(
-            label="Extreme Adjectives",
-            value=extreme_adjectives,
-            help="Count of extreme adjectives (e.g., 'always', 'never', 'completely')"
-        )
-    
-    with col3:
-        st.metric(
-            label="Clickbait Patterns",
-            value=clickbait,
-            help="Count of clickbait phrases (e.g., 'you won't believe', 'what happened next')"
-        )
-    
-    st.markdown("---")
-    
-    # Add interpretation note
-    st.info(
-        "**Interpretation Guide:** Higher counts and percentages indicate more suspicious patterns. "
-        "Credible journalism typically shows low values across all metrics, with balanced perspectives "
-        "and evidence-based claims."
-    )
+def render_empty():
+    st.markdown("""<div class="em-empty">
+  <div class="em-empty-icon">🎯</div>
+  <div class="em-empty-text">
+    Paste a news article above and click <strong>Analyze Article</strong>
+    to see a full credibility breakdown — score, patterns, highlighted claims, and more.
+  </div>
+</div>""", unsafe_allow_html=True)
 
 
-def render_emotional_tone(emotional_tone: str):
-    """
-    Render the emotional tone analysis section.
-    
-    Displays the emotional tone classification with descriptive text, color coding
-    for tone severity, and context about what the tone indicates. This helps users
-    identify potential emotional manipulation tactics.
-    
-    Args:
-        emotional_tone: Emotional tone classification string from EmotionalAnalyzer
-            Possible values:
-            - "Neutral and analytical"
-            - "Moderately emotional"
-            - "Conspiratorial and fear-inducing"
-            - "Sensationalized and attention-seeking"
-            - "Highly emotional and manipulative"
-    """
-    st.subheader("Emotional Tone Analysis")
-    st.markdown("Assessment of emotional manipulation and sensationalism:")
-    
-    # Determine tone severity and color coding
-    tone_lower = emotional_tone.lower()
-    
-    if "neutral" in tone_lower or "analytical" in tone_lower:
-        # Neutral tone - green (low concern)
-        tone_color = UIConfig.COLOR_REAL
-        severity_badge = "Low Concern"
-        severity_color = UIConfig.COLOR_LOW_RISK
-        icon = ""
-        context = (
-            "The article maintains a neutral, analytical tone typical of credible journalism. "
-            "This suggests the content focuses on facts and balanced reporting rather than "
-            "emotional manipulation."
-        )
-    elif "moderately emotional" in tone_lower:
-        # Moderate emotional tone - yellow (moderate concern)
-        tone_color = UIConfig.COLOR_MEDIUM_RISK
-        severity_badge = "Moderate Concern"
-        severity_color = UIConfig.COLOR_MEDIUM_RISK
-        icon = ""
-        context = (
-            "The article shows some emotional language that may be used to influence reader reactions. "
-            "While not necessarily problematic, this warrants attention to ensure the emotional content "
-            "doesn't overshadow factual reporting."
-        )
-    else:
-        # High concern tones (conspiratorial, sensationalized, highly emotional)
-        tone_color = UIConfig.COLOR_FAKE
-        severity_badge = "High Concern"
-        severity_color = UIConfig.COLOR_HIGH_RISK
-        icon = ""
-        
-        if "conspiratorial" in tone_lower:
-            context = (
-                "The article uses conspiratorial framing and fear-inducing language. "
-                "This is a strong indicator of misinformation, as credible sources avoid "
-                "conspiracy theories and focus on verifiable facts."
-            )
-        elif "sensationalized" in tone_lower:
-            context = (
-                "The article employs sensationalized, attention-seeking language designed to "
-                "provoke strong reactions. This clickbait approach is common in low-credibility "
-                "content and should be viewed with skepticism."
-            )
-        else:  # "highly emotional and manipulative"
-            context = (
-                "The article contains highly emotional and manipulative language intended to "
-                "bypass critical thinking and trigger emotional responses. This is a major red flag "
-                "for misinformation and propaganda."
-            )
-    
-    # Display emotional tone with color-coded box and text alternative
-    # Text alternative: Severity badge provides explicit text label alongside color
-    st.markdown(
-        f"""
-        <div style="padding: 20px; background-color: {tone_color}15; border-left: 5px solid {tone_color}; border-radius: 5px; margin-bottom: 15px;">
-            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
-                <div>
-                    <span style="font-size: 1.8em;">{icon}</span>
-                    <span style="font-size: 1.3em; font-weight: bold; color: {tone_color}; margin-left: 10px;">{emotional_tone}</span>
-                </div>
-                <span style="background-color: {severity_color}; color: white; padding: 8px 16px; border-radius: 15px; font-size: 0.9em; font-weight: bold;">{severity_badge}</span>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-    
-    # Display context about what the tone indicates
-    st.markdown("**What This Means:**")
-    st.markdown(
-        f"""
-        <div style="padding: 15px; background-color: #f8f9fa; border-radius: 5px; color: #333;">
-            {context}
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-    
-    st.markdown("<br>", unsafe_allow_html=True)
-    
-    # Add educational note about emotional manipulation
-    with st.expander("Understanding Emotional Manipulation in News"):
-        st.markdown("""
-        **Common Emotional Manipulation Tactics:**
-        
-        - **Fear-mongering:** Using alarming language to create anxiety and urgency
-        - **Outrage triggers:** Provoking anger to bypass rational analysis
-        - **Sensationalism:** Exaggerating facts to grab attention
-        - **Conspiracy framing:** Suggesting hidden agendas or cover-ups
-        - **Us vs. Them:** Creating divisive narratives to polarize readers
-        
-        **Why It Matters:**
-        
-        Credible journalism aims to inform, not manipulate. While some emotional content is natural 
-        in news reporting (especially for serious topics), excessive emotional language is often used 
-        to distract from weak evidence or to push a particular agenda.
-        
-        **What You Can Do:**
-        
-        - Notice your emotional reaction while reading
-        - Ask: "Is this making me feel something to avoid thinking critically?"
-        - Look for balanced, evidence-based reporting
-        - Cross-reference with multiple credible sources
-        """)
+def render_footer():
+    st.markdown("""<div class="em-footer">
+  <span class="em-footer-logo">El Matador</span>
+  <span>© 2024 El Matador. News Credibility Analyzer.</span>
+</div>""", unsafe_allow_html=True)
 
 
-def render_suspicious_claims(claims: List[str]):
-    """
-    Render the suspicious claims section.
-    
-    Displays up to 5 suspicious claims identified by the ClaimHighlighter component.
-    Each claim is shown as a quoted sentence with context about why claims are flagged.
-    When no claims are detected, displays an appropriate message.
-    
-    Args:
-        claims: List of suspicious claim strings from ClaimHighlighter
-            Each claim is a sentence extracted from the article that requires fact-checking
-    """
-    st.subheader("Suspicious Claims")
-    st.markdown("Specific statements that require fact-checking and verification:")
-    
-    # Check if claims list is empty
-    if not claims or len(claims) == 0:
-        # Display message when no suspicious claims are detected
-        st.markdown(
-            """
-            <div style="padding: 20px; background-color: #d4edda; border-left: 5px solid #28a745; border-radius: 5px; margin-top: 10px;">
-                <span style="font-size: 1.1em; color: #155724;">
-                    <strong>No highly suspicious claims detected</strong>
-                </span>
-                <br><br>
-                <span style="font-size: 0.95em; color: #155724;">
-                    The article does not contain obvious unverified claims or statements that trigger 
-                    immediate fact-checking alerts. However, this does not guarantee all information 
-                    is accurate—always verify important claims with authoritative sources.
-                </span>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-    else:
-        # Display up to 5 claims as numbered list
-        claims_to_display = claims[:5]  # Limit to 5 claims
-        
-        # Provide context about why claims are flagged
-        st.markdown(
-            """
-            <div style="padding: 15px; background-color: #fff3cd; border-left: 5px solid #ffc107; border-radius: 5px; margin-bottom: 20px;">
-                <span style="font-size: 0.95em; color: #856404;">
-                    <strong>Why These Claims Are Flagged:</strong> The following statements contain 
-                    unverified assertions, extraordinary claims, vague attributions, or statistical 
-                    claims without clear sources. These require independent fact-checking before 
-                    accepting as true.
-                </span>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-        
-        # Display each claim as quoted sentence in a numbered list
-        for idx, claim in enumerate(claims_to_display, start=1):
-            # Clean up the claim text (remove extra whitespace)
-            claim_text = " ".join(claim.split())
-            
-            # Display claim with number and quote styling
-            st.markdown(
-                f"""
-                <div style="padding: 15px; background-color: #f8f9fa; border-left: 4px solid #dc3545; border-radius: 5px; margin-bottom: 15px;">
-                    <div style="font-weight: bold; color: #dc3545; margin-bottom: 8px;">
-                        Claim #{idx}
-                    </div>
-                    <div style="font-style: italic; color: #333; font-size: 1.05em; line-height: 1.6;">
-                        "{claim_text}"
-                    </div>
-                </div>
-                """,
-                unsafe_allow_html=True
-            )
-        
-        # Add note if there are more than 5 claims
-        if len(claims) > 5:
-            st.caption(f"Note: Showing 5 of {len(claims)} suspicious claims detected. The most significant claims are displayed above.")
-        
-        st.markdown("<br>", unsafe_allow_html=True)
-        
-        # Add educational note about fact-checking
-        with st.expander("How to Fact-Check These Claims"):
-            st.markdown("""
-            **Recommended Fact-Checking Steps:**
-            
-            1. **Identify the Core Assertion:** What specific factual claim is being made?
-            2. **Check Primary Sources:** Look for original documents, studies, or official statements
-            3. **Consult Fact-Checking Organizations:** 
-               - FactCheck.org
-               - Snopes.com
-               - PolitiFact.com
-               - Full Fact (UK)
-               - AFP Fact Check
-            4. **Verify Statistics:** Check if numbers come from reputable sources (government agencies, peer-reviewed research)
-            5. **Look for Expert Consensus:** What do multiple credible experts say about this claim?
-            6. **Check Publication Date:** Is the information current or outdated?
-            7. **Examine the Source:** Who originally made this claim? Are they credible?
-            
-            **Red Flags to Watch For:**
-            
-            - Claims attributed to unnamed "experts" or "sources"
-            - Statistics without clear sources or methodology
-            - Extraordinary claims without extraordinary evidence
-            - Claims that contradict established scientific consensus
-            - Information that can't be verified through multiple independent sources
-            
-            **Remember:** Absence of evidence is not evidence of truth. If a claim cannot be 
-            independently verified, treat it with skepticism until proper evidence emerges.
-            """)
-
-
-def render_explanation(result: Dict):
-    """
-    Render the final explanation and recommendations section.
-    
-    Displays the detailed explanation text generated by the CredibilityAnalyzer
-    and the recommended action based on the risk level. This section provides
-    users with comprehensive context about the analysis and actionable guidance.
-    
-    Args:
-        result: Analysis result dictionary from CredibilityAnalyzer.analyze()
-            Expected keys: explanation, recommended_action
-    """
-    st.subheader("Final Explanation & Recommendations")
-    
-    # Get values from result dictionary
-    explanation = result.get("explanation", "No explanation available.")
-    recommended_action = result.get("recommended_action", "No recommendation available.")
-    
-    # Display detailed explanation text
-    st.markdown("**Detailed Analysis Explanation:**")
-    st.markdown(
-        f"""
-        <div style="padding: 20px; background-color: #f8f9fa; border-radius: 8px; border: 1px solid #dee2e6; margin-bottom: 20px;">
-            <p style="font-size: 1.05em; line-height: 1.7; color: #333; margin: 0;">
-                {explanation}
-            </p>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-    
-    # Display recommended action based on risk level
-    st.markdown("**Recommended Action:**")
-    
-    # Determine icon and color based on the content of recommended action
-    if "high risk" in recommended_action.lower() or "extreme caution" in recommended_action.lower():
-        action_icon = ""
-        action_color = UIConfig.COLOR_HIGH_RISK
-        action_bg_color = f"{UIConfig.COLOR_HIGH_RISK}15"
-    elif "medium risk" in recommended_action.lower() or "caution" in recommended_action.lower():
-        action_icon = ""
-        action_color = UIConfig.COLOR_MEDIUM_RISK
-        action_bg_color = f"{UIConfig.COLOR_MEDIUM_RISK}15"
-    else:
-        action_icon = ""
-        action_color = UIConfig.COLOR_LOW_RISK
-        action_bg_color = f"{UIConfig.COLOR_LOW_RISK}15"
-    
-    st.markdown(
-        f"""
-        <div style="padding: 20px; background-color: {action_bg_color}; border-left: 5px solid {action_color}; border-radius: 8px; margin-bottom: 20px;">
-            <div style="display: flex; align-items: flex-start;">
-                <span style="font-size: 2em; margin-right: 15px;">{action_icon}</span>
-                <p style="font-size: 1.05em; line-height: 1.7; color: #333; margin: 0; flex: 1;">
-                    {recommended_action}
-                </p>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-    
-    # Add important disclaimer
-    st.markdown("---")
-    st.markdown(
-        """
-        <div style="padding: 15px; background-color: #e7f3ff; border-left: 4px solid #2196F3; border-radius: 5px;">
-            <strong>Important Disclaimer:</strong>
-            <br><br>
-            This analysis is based on <strong>linguistic patterns and structural analysis only</strong>. 
-            It does not perform external fact-checking, verify sources, or access real-time information. 
-            <strong>Always verify important claims through multiple credible sources</strong> and consult 
-            subject matter experts when making significant decisions based on news content.
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-
-# ============================================================================
-# Sidebar Information Display
-# ============================================================================
-
-def render_sidebar():
-    """
-    Render the sidebar with model information, metrics, and disclaimers.
-    
-    Displays comprehensive information about the ML model including architecture,
-    training data, performance metrics, and important disclaimers. This provides
-    transparency about the system's capabilities and limitations.
-    
-    Requirements: 10.1, 10.2, 10.3, 19.1, 19.2, 19.3, 19.4
-    """
-    with st.sidebar:
-        st.header("Model Information")
-        
-        # Model Type
-        st.subheader("Model Architecture")
-        st.markdown(
-            f"""
-            <div style="padding: 15px; background-color: #f8f9fa; border-radius: 8px; border: 1px solid #dee2e6; margin-bottom: 15px;">
-                <div style="font-weight: bold; color: #333; margin-bottom: 8px;">Model Type:</div>
-                <div style="font-size: 1.1em; color: #0066cc;">{UIConfig.MODEL_TYPE}</div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-        
-        # Model Architecture Description
-        st.markdown(
-            """
-            **Architecture Details:**
-            
-            This system combines traditional machine learning with linguistic pattern analysis:
-            
-            - **TF-IDF Vectorization:** Converts text into numerical features based on term frequency-inverse document frequency
-            - **Logistic Regression Classifier:** Binary classification model trained to distinguish credible from non-credible content
-            - **Pattern Detection Layer:** Rule-based analysis of linguistic red flags and suspicious patterns
-            - **Ensemble Scoring:** Combines ML predictions with pattern analysis for final credibility assessment
-            """
-        )
-        
-        st.markdown("---")
-        
-        # Training Dataset Information
-        st.subheader("Training Data")
-        st.markdown(
-            f"""
-            <div style="padding: 15px; background-color: #f8f9fa; border-radius: 8px; border: 1px solid #dee2e6; margin-bottom: 15px;">
-                <div style="font-weight: bold; color: #333; margin-bottom: 8px;">Dataset Size:</div>
-                <div style="font-size: 1.3em; color: #28a745; font-weight: bold;">{UIConfig.DATASET_SIZE}</div>
-                <div style="font-size: 0.9em; color: #666; margin-top: 8px;">
-                    Labeled news articles from multiple sources, including both credible journalism and known misinformation
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-        
-        st.markdown(
-            """
-            **Dataset Characteristics:**
-            
-            - Diverse sources (mainstream media, fact-checked fake news, satire)
-            - Balanced representation of credible and non-credible content
-            - Multiple domains (politics, health, science, entertainment)
-            - Cross-validated for robust performance
-            """
-        )
-        
-        st.markdown("---")
-        
-        # Performance Metrics
-        st.subheader("Model Performance")
-        st.markdown("**Cross-Validation Metrics:**")
-        
-        # Create metrics table
-        metrics_data = {
-            "Metric": ["Accuracy", "Precision", "Recall", "F1-Score"],
-            "Score": [
-                f"{UIConfig.ACCURACY:.2%}",
-                f"{UIConfig.PRECISION:.2%}",
-                f"{UIConfig.RECALL:.2%}",
-                f"{UIConfig.F1_SCORE:.2%}"
-            ]
-        }
-        
-        # Display metrics in a clean table format
-        st.markdown(
-            f"""
-            <div style="padding: 15px; background-color: #f8f9fa; border-radius: 8px; border: 1px solid #dee2e6; margin-bottom: 15px;">
-                <table style="width: 100%; border-collapse: collapse;">
-                    <thead>
-                        <tr style="border-bottom: 2px solid #dee2e6;">
-                            <th style="text-align: left; padding: 10px; color: #333;">Metric</th>
-                            <th style="text-align: right; padding: 10px; color: #333;">Score</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr style="border-bottom: 1px solid #dee2e6;">
-                            <td style="padding: 10px; color: #666;">Accuracy</td>
-                            <td style="text-align: right; padding: 10px; font-weight: bold; color: #28a745;">{UIConfig.ACCURACY:.2%}</td>
-                        </tr>
-                        <tr style="border-bottom: 1px solid #dee2e6;">
-                            <td style="padding: 10px; color: #666;">Precision</td>
-                            <td style="text-align: right; padding: 10px; font-weight: bold; color: #28a745;">{UIConfig.PRECISION:.2%}</td>
-                        </tr>
-                        <tr style="border-bottom: 1px solid #dee2e6;">
-                            <td style="padding: 10px; color: #666;">Recall</td>
-                            <td style="text-align: right; padding: 10px; font-weight: bold; color: #28a745;">{UIConfig.RECALL:.2%}</td>
-                        </tr>
-                        <tr>
-                            <td style="padding: 10px; color: #666;">F1-Score</td>
-                            <td style="text-align: right; padding: 10px; font-weight: bold; color: #28a745;">{UIConfig.F1_SCORE:.2%}</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-        
-        st.markdown(
-            """
-            **Metric Definitions:**
-            
-            - **Accuracy:** Overall correctness of predictions
-            - **Precision:** Proportion of positive predictions that are correct
-            - **Recall:** Proportion of actual positives correctly identified
-            - **F1-Score:** Harmonic mean of precision and recall
-            """
-        )
-        
-        st.markdown("---")
-        
-        # Model Version/Date
-        st.subheader("Model Version")
-        st.markdown(
-            """
-            <div style="padding: 15px; background-color: #e7f3ff; border-radius: 8px; border-left: 4px solid #2196F3; margin-bottom: 15px;">
-                <div style="font-weight: bold; color: #333; margin-bottom: 5px;">Version:</div>
-                <div style="color: #0066cc;">v1.0 (2024)</div>
-                <div style="font-size: 0.85em; color: #666; margin-top: 8px;">
-                    Research-grade prototype for educational and demonstration purposes
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-        
-        st.markdown("---")
-        
-        # Model Documentation Reference
-        st.subheader("Documentation")
-        st.markdown(
-            """
-            <div style="padding: 15px; background-color: #f8f9fa; border-radius: 8px; border: 1px solid #dee2e6; margin-bottom: 15px;">
-                <div style="font-weight: bold; color: #333; margin-bottom: 8px;">Model Documentation:</div>
-                <div style="font-size: 0.95em; color: #666; margin-bottom: 10px;">
-                    For detailed information about the model architecture, training methodology, and usage guidelines, 
-                    please refer to the project documentation.
-                </div>
-                <div style="margin-top: 10px;">
-                    <a href="https://github.com/yourusername/verifyai" target="_blank" style="color: #0066cc; text-decoration: none; font-weight: 500;">
-                        View Full Documentation →
-                    </a>
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-        
-        st.markdown("---")
-        
-        # Disclaimers Section
-        st.subheader("Important Disclaimers")
-        
-        # Disclaimer about probabilistic classification
-        st.markdown(
-            """
-            <div style="padding: 12px; background-color: #fff3cd; border-radius: 8px; border-left: 4px solid #ffc107; margin-bottom: 12px;">
-                <div style="font-weight: bold; color: #856404; margin-bottom: 5px;">Probabilistic Classification</div>
-                <div style="font-size: 0.9em; color: #856404;">
-                    This system provides probabilistic assessments based on statistical patterns, not definitive truth determinations. 
-                    Results represent likelihood estimates and should be interpreted as one input among many in credibility evaluation.
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-        
-        # Disclaimer about no external fact-checking
-        st.markdown(
-            """
-            <div style="padding: 12px; background-color: #fff3cd; border-radius: 8px; border-left: 4px solid #ffc107; margin-bottom: 12px;">
-                <div style="font-weight: bold; color: #856404; margin-bottom: 5px;">No External Fact-Checking</div>
-                <div style="font-size: 0.9em; color: #856404;">
-                    This system does NOT perform external fact-checking, verify claims against authoritative sources, or access 
-                    real-time information. Analysis is based solely on linguistic patterns and text characteristics within the 
-                    provided article.
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-        
-        # Disclaimer about need for human verification
-        st.markdown(
-            """
-            <div style="padding: 12px; background-color: #fff3cd; border-radius: 8px; border-left: 4px solid #ffc107; margin-bottom: 12px;">
-                <div style="font-weight: bold; color: #856404; margin-bottom: 5px;">Human Verification Required</div>
-                <div style="font-size: 0.9em; color: #856404;">
-                    All results require human verification and critical thinking. This tool is designed to assist, not replace, 
-                    human judgment. Always cross-reference suspicious claims with authoritative sources and professional fact-checkers 
-                    before drawing conclusions.
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-
-
-# ============================================================================
-# Main Application Entry Point
-# ============================================================================
+# ══════════════════════════════════════════════════════════════════════════════
+#  MAIN
+# ══════════════════════════════════════════════════════════════════════════════
 
 def main():
-    """
-    Main application entry point.
-    
-    Orchestrates the entire UI layout and analysis workflow. Sets up page configuration,
-    initializes session state, loads models, creates the two-column layout, and manages
-    the analysis workflow.
-    
-    Requirements: 1.1, 1.2, 1.4, 1.5, 18.1
-    """
-    # Set page config with wide layout and title
-    st.set_page_config(
-        page_title="VerifyAI: ML-Based News Credibility Analysis",
-        layout=UIConfig.LAYOUT_MODE,
-        initial_sidebar_state="expanded"
-    )
-    
-    st.title("VerifyAI: ML-Based News Credibility Analysis")
-    st.markdown("---")
-    
-    # Initialize session state variables (results, analyzed, article_text)
+    inject_css()
+    render_nav()
+
+    st.markdown('<div class="em-page">', unsafe_allow_html=True)
+    render_hero()
+
+    try:
+        with st.spinner("Loading model…"):
+            model, vectorizer = load_model()
+            analyzer = load_analyzer()
+    except FileNotFoundError as e:
+        st.error(f"**Model not found** — {e}")
+        st.info("Run `python train_model.py` to train the model, then restart the app.")
+        st.markdown("</div>", unsafe_allow_html=True)
+        return
+
+    text, clicked = render_input()
+
     if "results" not in st.session_state:
         st.session_state.results = None
-    
-    if "analyzed" not in st.session_state:
-        st.session_state.analyzed = False
-    
-    if "article_text" not in st.session_state:
-        st.session_state.article_text = ""
-    
-    if "analyzing" not in st.session_state:
-        st.session_state.analyzing = False
-    
-    # Render sidebar with model information
-    render_sidebar()
-    
-    # Load models with spinner feedback
-    try:
-        with st.spinner("Initializing models and analyzer..."):
-            analyzer = load_analyzer()
-            model, vectorizer = load_model()
-        st.success("Models loaded successfully!")
-    except (FileNotFoundError, Exception) as e:
-        # Error messages are already displayed by the load functions
-        st.stop()  # Stop execution if models fail to load
-    
-    # Create two-column layout with ratio [1, 1.3]
-    col1, col2 = st.columns(UIConfig.COLUMN_RATIO)
-    
-    # Render input panel in left column
-    with col1:
-        article_text = render_input_panel()
-    
-    # Render results in right column
-    with col2:
-        st.header("Analysis Results")
-        
-        # Check if analyze button was clicked
-        if st.session_state.get("analyze_clicked", False):
-            # Validate input
-            is_valid, error_message = validate_input(article_text)
-            
-            if not is_valid:
-                st.warning(f"{error_message}")
-                st.session_state.analyze_clicked = False
-            else:
-                # Clear previous results when new analysis is triggered (Requirement 18.3)
+
+    if clicked and text.strip():
+        with st.spinner("Analyzing…"):
+            try:
+                st.session_state.results = analyzer.analyze(text, model, vectorizer)
+            except Exception as e:
+                st.error(f"Analysis failed: {e}")
                 st.session_state.results = None
-                st.session_state.analyzed = False
-                
-                # Disable analyze button during analysis (handled by session state)
-                st.session_state.analyzing = True
-                
-                # Display spinner during analysis
-                with st.spinner("Analyzing article..."):
-                    try:
-                        # Call analyzer.analyze() with article text, model, and vectorizer
-                        results = analyzer.analyze(article_text, model, vectorizer)
-                        
-                        # Store results in session state
-                        st.session_state.results = results
-                        st.session_state.analyzed = True
-                        
-                        # Display success message when analysis completes
-                        st.success("Analysis complete! Results are displayed below.")
-                        
-                    except Exception as e:
-                        st.error(f"**Analysis Error**: {str(e)}")
-                        st.error("Please try again or contact support if the issue persists.")
-                        st.session_state.results = None
-                        st.session_state.analyzed = False
-                    finally:
-                        # Reset button state
-                        st.session_state.analyze_clicked = False
-                        st.session_state.analyzing = False
-        
-        # Display results if analysis has been performed
-        if st.session_state.analyzed and st.session_state.results:
-            results = st.session_state.results
-            
-            # Render all 6 sections in order
-            # 1. Verdict Summary
-            render_verdict_summary(results)
-            st.markdown("---")
-            
-            # 2. Model Prediction Details
-            render_model_details(results)
-            st.markdown("---")
-            
-            # 3. Linguistic Pattern Analysis
-            render_pattern_analysis(results.get("patterns", {}))
-            st.markdown("---")
-            
-            # 4. Emotional Tone Analysis
-            render_emotional_tone(results.get("emotional_tone", "N/A"))
-            st.markdown("---")
-            
-            # 5. Suspicious Claims
-            render_suspicious_claims(results.get("suspicious_claims", []))
-            st.markdown("---")
-            
-            # 6. Final Explanation
-            render_explanation(results)
-            
-        else:
-            st.info("Enter an article in the input panel and click 'Analyze Article' to see results.")
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    if st.session_state.results:
+        render_results(st.session_state.results, text)
+    else:
+        render_empty()
+
+    render_footer()
+    st.markdown("</div>", unsafe_allow_html=True)
 
 
 if __name__ == "__main__":
