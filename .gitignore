@@ -1,9 +1,54 @@
+# ── Python artefacts ─────────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
 *$py.class
+*.pyo
+
+# ── Virtual environments ──────────────────────────────────────────────────────
 venv/
 env/
+.venv/
 .env
+
+# ── IDE / editor ──────────────────────────────────────────────────────────────
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ── Datasets (large CSV files) ────────────────────────────────────────────────
 *.csv
+dataset/
+
+# ── Trained model artefacts (large binaries) ─────────────────────────────────
+models/*.joblib
+models/*.pkl
+models/*.h5
+models/*.pt
+# Keep metadata and training report (small text files)
+!models/metadata.txt
+!models/training_report.json
+
+# ── Streamlit / app cache ─────────────────────────────────────────────────────
+.streamlit/secrets.toml
+__pycache__/
+
+# ── Pytest / coverage ─────────────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+*.cover
+
+# ── Jupyter / notebooks ───────────────────────────────────────────────────────
+.ipynb_checkpoints/
+*.ipynb
+
+# ── Project-specific ──────────────────────────────────────────────────────────
 .kiro/.config.kiro
 .kiro
+ProjectReport/
+
+# ── Secrets ───────────────────────────────────────────────────────────────────
+*.env
+secrets.json
